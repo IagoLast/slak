@@ -1,4 +1,5 @@
 import {
+  index,
   jsonb,
   pgTable,
   primaryKey,
@@ -45,7 +46,10 @@ export const channelMembers = pgTable(
       .notNull()
       .defaultNow(),
   },
-  (t) => [primaryKey({ columns: [t.channelId, t.userId] })],
+  (t) => [
+    primaryKey({ columns: [t.channelId, t.userId] }),
+    index("channel_members_user_idx").on(t.userId),
+  ],
 );
 
 export const messages = pgTable("messages", {
@@ -67,7 +71,11 @@ export const messages = pgTable("messages", {
   createdAt: timestamp("created_at", { withTimezone: true })
     .notNull()
     .defaultNow(),
-});
+},
+(t) => [
+  index("messages_channel_created_idx").on(t.channelId, t.createdAt),
+  index("messages_parent_idx").on(t.parentId),
+]);
 
 export const invites = pgTable("invites", {
   token: text("token").primaryKey(),

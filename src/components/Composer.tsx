@@ -2,16 +2,16 @@
 
 import { useRef, useState } from "react";
 import { FiMic, FiPaperclip, FiSend, FiSquare } from "react-icons/fi";
+import { MessagePayload } from "@/lib/client";
 
 type Props = {
-  /** URL del POST de mensajes: canal o hilo. */
-  endpoint: string;
   placeholder: string;
   compact?: boolean;
-  onSent: () => void;
+  /** Envía el mensaje (el contenedor decide endpoint y update optimista). */
+  onSend: (payload: MessagePayload) => Promise<void>;
 };
 
-export default function Composer({ endpoint, placeholder, compact, onSent }: Props) {
+export default function Composer({ placeholder, compact, onSend }: Props) {
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -19,32 +19,16 @@ export default function Composer({ endpoint, placeholder, compact, onSent }: Pro
   const fileInputRef = useRef<HTMLInputElement>(null);
   const recorderRef = useRef<MediaRecorder | null>(null);
 
-  async function sendMessage(payload: Record<string, unknown>) {
-    setBusy(true);
-    setError(null);
-    try {
-      const res = await fetch(endpoint, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      });
-      if (!res.ok) {
-        const data = await res.json().catch(() => null);
-        throw new Error(data?.error ?? "No se pudo enviar el mensaje.");
-      }
-      onSent();
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Error al enviar.");
-    } finally {
-      setBusy(false);
-    }
-  }
-
   async function sendText() {
     const content = text.trim();
     if (!content || busy) return;
+    setError(null);
     setText("");
-    await sendMessage({ content });
+    // Optimista: no bloqueamos la caja de texto mientras viaja el mensaje.
+    onSend({ content }).catch((e) => {
+      setError(e instanceof Error ? e.message : "No se pudo enviar el mensaje.");
+      setText(content);
+    });
   }
 
   async function uploadAndSend(file: File, type: "file" | "image" | "audio") {
@@ -56,7 +40,7 @@ export default function Composer({ endpoint, placeholder, compact, onSent }: Pro
       const res = await fetch("/api/upload", { method: "POST", body: formData });
       const data = await res.json().catch(() => null);
       if (!res.ok) throw new Error(data?.error ?? "No se pudo subir el archivo.");
-      await sendMessage({
+      await onSend({
         content: text.trim() || null,
         attachmentUrl: data.url,
         attachmentName: data.name,
@@ -65,6 +49,7 @@ export default function Composer({ endpoint, placeholder, compact, onSent }: Pro
       setText("");
     } catch (e) {
       setError(e instanceof Error ? e.message : "Error al subir el archivo.");
+    } finally {
       setBusy(false);
     }
   }

@@ -8,8 +8,10 @@ export type SummaryChannel = {
   id: string;
   name: string;
   type: "public" | "private" | "dm";
+  description: string | null;
   unread: number;
   dmUserId?: string;
+  lastMessage: { author: string; preview: string } | null;
 };
 
 export type SummaryUser = {
@@ -19,9 +21,21 @@ export type SummaryUser = {
 };
 
 export type Summary = {
-  user: { id: string; name: string; email: string; role: string };
+  user: {
+    id: string;
+    name: string;
+    email: string;
+    role: "admin" | "member" | "guest";
+  };
   channels: SummaryChannel[];
   users: SummaryUser[];
+};
+
+export type MessagePayload = {
+  content?: string | null;
+  attachmentUrl?: string;
+  attachmentName?: string;
+  attachmentType?: "file" | "image" | "audio";
 };
 
 export type ChatMessage = {

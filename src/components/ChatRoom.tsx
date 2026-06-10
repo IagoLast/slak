@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import useSWR from "swr";
 import AddMemberButton from "@/components/AddMemberButton";
 import Composer from "@/components/Composer";
@@ -8,7 +8,7 @@ import Huddle from "@/components/Huddle";
 import MessageItem from "@/components/MessageItem";
 import { ChannelIcon } from "@/components/Sidebar";
 import ThreadPanel from "@/components/ThreadPanel";
-import { ChatMessage, fetcher } from "@/lib/client";
+import { ChatMessage, fetcher, MessagePayload } from "@/lib/client";
 import { SessionUser } from "@/lib/session";
 
 type Props = {
@@ -59,6 +59,46 @@ export default function ChatRoom({
     if (!el) return;
     stickToBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
   }
+
+  // Envío optimista: el mensaje aparece al instante y la revalidación
+  // posterior lo sustituye por el real (o lo retira si el envío falló).
+  const sendMessage = useCallback(
+    async (payload: MessagePayload) => {
+      const optimistic: ChatMessage = {
+        id: `optimistic-${Date.now()}`,
+        content: payload.content ?? null,
+        attachmentUrl: payload.attachmentUrl ?? null,
+        attachmentName: payload.attachmentName ?? null,
+        attachmentType: payload.attachmentType ?? null,
+        createdAt: new Date().toISOString(),
+        replyCount: 0,
+        user: { id: currentUser.id, name: currentUser.name },
+      };
+      stickToBottom.current = true;
+      await mutate(
+        async (current) => {
+          const res = await fetch(`/api/channels/${channelId}/messages`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload),
+          });
+          if (!res.ok) {
+            const data = await res.json().catch(() => null);
+            throw new Error(data?.error ?? "No se pudo enviar el mensaje.");
+          }
+          return { messages: [...(current?.messages ?? []), optimistic] };
+        },
+        {
+          optimisticData: (current) => ({
+            messages: [...(current?.messages ?? []), optimistic],
+          }),
+          rollbackOnError: true,
+          revalidate: true,
+        },
+      );
+    },
+    [channelId, currentUser.id, currentUser.name, mutate],
+  );
 
   return (
     <div className="flex h-full min-h-0">
@@ -115,14 +155,10 @@ export default function ChatRoom({
         </div>
 
         <Composer
-          endpoint={`/api/channels/${channelId}/messages`}
           placeholder={
             channelType === "dm" ? `Mensaje a ${channelName}` : `Mensaje a #${channelName}`
           }
-          onSent={() => {
-            stickToBottom.current = true;
-            mutate();
-          }}
+          onSend={sendMessage}
         />
       </div>
 

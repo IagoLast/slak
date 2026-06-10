@@ -1,4 +1,4 @@
-import { and, asc, eq, inArray, ne, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, ne, or, sql } from "drizzle-orm";
 import { NextResponse } from "next/server";
 import { db } from "@/db";
 import { channelMembers, channels, messages, users } from "@/db/schema";
@@ -56,6 +56,30 @@ export async function GET() {
     .groupBy(messages.channelId);
   const unreadByChannel = new Map(unreadRows.map((r) => [r.channelId, r.count]));
 
+  // Último mensaje de los canales con no-leídos, para la preview de la notificación.
+  const unreadIds = [...unreadByChannel.keys()];
+  const lastMessages =
+    unreadIds.length > 0
+      ? await db
+          .selectDistinctOn([messages.channelId], {
+            channelId: messages.channelId,
+            content: messages.content,
+            attachmentType: messages.attachmentType,
+            attachmentName: messages.attachmentName,
+            author: users.name,
+          })
+          .from(messages)
+          .innerJoin(users, eq(users.id, messages.userId))
+          .where(inArray(messages.channelId, unreadIds))
+          .orderBy(messages.channelId, desc(messages.createdAt))
+      : [];
+  const lastByChannel = new Map(
+    lastMessages.map((m) => [
+      m.channelId,
+      { author: m.author, preview: messagePreview(m) },
+    ]),
+  );
+
   // Para los DMs, averiguar quién es la otra persona.
   const dmIds = visibleChannels.filter((c) => c.type === "dm").map((c) => c.id);
   const dmPartners =
@@ -90,9 +114,25 @@ export async function GET() {
       id: c.id,
       name: c.type === "dm" ? (partnerByChannel.get(c.id)?.name ?? "DM") : c.name,
       type: c.type,
+      description: c.type === "dm" ? null : c.description,
       unread: unreadByChannel.get(c.id) ?? 0,
       dmUserId: c.type === "dm" ? partnerByChannel.get(c.id)?.id : undefined,
+      lastMessage: lastByChannel.get(c.id) ?? null,
     })),
     users: allUsers,
   });
+}
+
+function messagePreview(m: {
+  content: string | null;
+  attachmentType: string | null;
+  attachmentName: string | null;
+}): string {
+  if (m.content) {
+    // Quitar la sintaxis de formato más común para que la preview sea legible.
+    return m.content.replace(/[*_~`>#]+/g, "").replace(/\s+/g, " ").trim().slice(0, 120);
+  }
+  if (m.attachmentType === "audio") return "Nota de voz";
+  if (m.attachmentType === "image") return "Imagen";
+  return m.attachmentName ? `Archivo: ${m.attachmentName}` : "Archivo";
 }

@@ -1,10 +1,11 @@
 "use client";
 
+import { useCallback } from "react";
 import { FiX } from "react-icons/fi";
 import useSWR from "swr";
 import Composer from "@/components/Composer";
 import MessageItem from "@/components/MessageItem";
-import { ChatMessage, fetcher } from "@/lib/client";
+import { ChatMessage, fetcher, MessagePayload } from "@/lib/client";
 import { SessionUser } from "@/lib/session";
 
 /**
@@ -23,6 +24,45 @@ export default function ThreadPanel({
     `/api/messages/${rootId}/thread`,
     fetcher,
     { refreshInterval: 2500 },
+  );
+
+  const sendReply = useCallback(
+    async (payload: MessagePayload) => {
+      const optimistic: ChatMessage = {
+        id: `optimistic-${Date.now()}`,
+        content: payload.content ?? null,
+        attachmentUrl: payload.attachmentUrl ?? null,
+        attachmentName: payload.attachmentName ?? null,
+        attachmentType: payload.attachmentType ?? null,
+        createdAt: new Date().toISOString(),
+        user: { id: currentUser.id, name: currentUser.name },
+      };
+      await mutate(
+        async (current) => {
+          const res = await fetch(`/api/messages/${rootId}/thread`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload),
+          });
+          if (!res.ok) {
+            const data = await res.json().catch(() => null);
+            throw new Error(data?.error ?? "No se pudo enviar la respuesta.");
+          }
+          return current
+            ? { ...current, replies: [...current.replies, optimistic] }
+            : current;
+        },
+        {
+          optimisticData: (current) =>
+            current
+              ? { ...current, replies: [...current.replies, optimistic] }
+              : current!,
+          rollbackOnError: true,
+          revalidate: true,
+        },
+      );
+    },
+    [rootId, currentUser.id, currentUser.name, mutate],
   );
 
   return (
@@ -71,12 +111,7 @@ export default function ThreadPanel({
         )}
       </div>
 
-      <Composer
-        endpoint={`/api/messages/${rootId}/thread`}
-        placeholder="Responder en el hilo"
-        compact
-        onSent={() => mutate()}
-      />
+      <Composer placeholder="Responder en el hilo" compact onSend={sendReply} />
     </div>
   );
 }

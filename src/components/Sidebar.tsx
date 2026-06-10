@@ -65,8 +65,9 @@ export default function Sidebar({
           channel.id === activeChannelId && document.visibilityState === "visible";
         if (channel.unread > before && !isActiveAndVisible) {
           const title = channel.type === "dm" ? channel.name : `#${channel.name}`;
+          const last = channel.lastMessage;
           new Notification(title, {
-            body: "Tienes mensajes nuevos",
+            body: last ? `${last.author}: ${last.preview}` : "Tienes mensajes nuevos",
             tag: channel.id,
           });
         }
@@ -355,6 +356,7 @@ function ChannelLink({
     <li>
       <Link
         href={`/c/${channel.id}`}
+        prefetch
         onClick={onNavigate}
         className={`flex items-center gap-2 rounded px-2 py-1.5 text-sm ${
           active
