@@ -4,9 +4,29 @@ import { signOut } from "next-auth/react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
+import {
+  FiAtSign,
+  FiBell,
+  FiBellOff,
+  FiHash,
+  FiLock,
+  FiLogOut,
+  FiPlus,
+  FiUserPlus,
+  FiX,
+} from "react-icons/fi";
 import useSWR from "swr";
 import { fetcher, Summary, SummaryChannel } from "@/lib/client";
 import { SessionUser } from "@/lib/session";
+
+const NOTIF_PREF_KEY = "slak:notifications";
+
+function notificationsEnabled() {
+  return (
+    typeof window === "undefined" ||
+    window.localStorage.getItem(NOTIF_PREF_KEY) !== "off"
+  );
+}
 
 export default function Sidebar({
   currentUser,
@@ -25,22 +45,19 @@ export default function Sidebar({
 
   const [showNewChannel, setShowNewChannel] = useState(false);
   const [showDmPicker, setShowDmPicker] = useState(false);
-  const [notifReady, setNotifReady] = useState(false);
+  const [showNotifSettings, setShowNotifSettings] = useState(false);
 
   // Notificaciones del navegador cuando suben los no-leídos de otros canales.
   const prevUnread = useRef<Map<string, number>>(new Map());
   useEffect(() => {
-    if (typeof Notification !== "undefined") {
-      // Lectura única de un estado externo del navegador al montar; no puede
-      // hacerse en el render inicial porque rompería la hidratación SSR.
-      // eslint-disable-next-line react-hooks/set-state-in-effect
-      setNotifReady(Notification.permission === "granted");
-    }
-  }, []);
-  useEffect(() => {
     if (!data) return;
     const prev = prevUnread.current;
-    if (prev.size > 0 && typeof Notification !== "undefined" && Notification.permission === "granted") {
+    if (
+      prev.size > 0 &&
+      typeof Notification !== "undefined" &&
+      Notification.permission === "granted" &&
+      notificationsEnabled()
+    ) {
       for (const channel of data.channels) {
         const before = prev.get(channel.id) ?? 0;
         const isActiveAndVisible =
@@ -56,12 +73,6 @@ export default function Sidebar({
     }
     prevUnread.current = new Map(data.channels.map((c) => [c.id, c.unread]));
   }, [data, activeChannelId]);
-
-  async function requestNotifications() {
-    if (typeof Notification === "undefined") return;
-    const permission = await Notification.requestPermission();
-    setNotifReady(permission === "granted");
-  }
 
   async function openDm(userId: string) {
     setShowDmPicker(false);
@@ -86,15 +97,13 @@ export default function Sidebar({
     <aside className="flex h-full w-72 shrink-0 flex-col bg-violet-950 text-violet-100 md:w-64">
       <div className="flex items-center justify-between border-b border-violet-900 px-4 py-3">
         <span className="text-lg font-bold text-white">Slak</span>
-        {!notifReady && (
-          <button
-            onClick={requestNotifications}
-            title="Activar notificaciones"
-            className="rounded px-2 py-1 text-xs text-violet-300 hover:bg-violet-900"
-          >
-            🔔 Activar
-          </button>
-        )}
+        <button
+          onClick={() => setShowNotifSettings(true)}
+          title="Ajustes de notificaciones"
+          className="rounded p-1.5 text-violet-300 hover:bg-violet-900 hover:text-white"
+        >
+          <FiBell size={16} />
+        </button>
       </div>
 
       <nav className="flex-1 overflow-y-auto px-2 py-3">
@@ -131,11 +140,12 @@ export default function Sidebar({
             <Link
               href="/invites"
               onClick={onNavigate}
-              className={`block rounded px-2 py-1.5 text-sm hover:bg-violet-900 ${
+              className={`flex items-center gap-2 rounded px-2 py-1.5 text-sm hover:bg-violet-900 ${
                 pathname === "/invites" ? "bg-violet-800 text-white" : "text-violet-300"
               }`}
             >
-              ✉️ Invitar personas
+              <FiUserPlus size={15} />
+              Invitar personas
             </Link>
           </div>
         )}
@@ -154,9 +164,9 @@ export default function Sidebar({
         <button
           onClick={() => signOut({ callbackUrl: "/login" })}
           title="Cerrar sesión"
-          className="rounded px-2 py-1 text-xs text-violet-300 hover:bg-violet-900"
+          className="rounded p-1.5 text-violet-300 hover:bg-violet-900 hover:text-white"
         >
-          Salir
+          <FiLogOut size={16} />
         </button>
       </div>
 
@@ -198,7 +208,105 @@ export default function Sidebar({
           )}
         </Modal>
       )}
+
+      {showNotifSettings && (
+        <NotificationSettingsModal onClose={() => setShowNotifSettings(false)} />
+      )}
     </aside>
+  );
+}
+
+function NotificationSettingsModal({ onClose }: { onClose: () => void }) {
+  const [permission, setPermission] = useState<NotificationPermission | "unsupported">(
+    () => (typeof Notification === "undefined" ? "unsupported" : Notification.permission),
+  );
+  const [enabled, setEnabled] = useState(notificationsEnabled);
+
+  async function requestPermission() {
+    if (typeof Notification === "undefined") return;
+    setPermission(await Notification.requestPermission());
+  }
+
+  function toggleEnabled() {
+    const next = !enabled;
+    setEnabled(next);
+    window.localStorage.setItem(NOTIF_PREF_KEY, next ? "on" : "off");
+  }
+
+  function sendTest() {
+    new Notification("Slak", { body: "Así se verán las notificaciones 🎉" });
+  }
+
+  const ready = permission === "granted" && enabled;
+
+  return (
+    <Modal title="Notificaciones" onClose={onClose}>
+      <div className="space-y-4">
+        {permission === "unsupported" && (
+          <p className="text-sm text-gray-500">
+            Este navegador no soporta notificaciones.
+          </p>
+        )}
+
+        {permission === "default" && (
+          <div className="rounded-lg bg-amber-50 p-3 text-sm text-amber-900">
+            <p className="mb-2">
+              El navegador aún no tiene permiso para mostrar notificaciones.
+            </p>
+            <button
+              onClick={requestPermission}
+              className="rounded-lg bg-violet-700 px-3 py-1.5 text-sm font-semibold text-white hover:bg-violet-800"
+            >
+              Conceder permiso
+            </button>
+          </div>
+        )}
+
+        {permission === "denied" && (
+          <p className="rounded-lg bg-red-50 p-3 text-sm text-red-800">
+            Las notificaciones están bloqueadas. Actívalas en los ajustes del
+            navegador (icono del candado junto a la dirección) y recarga la página.
+          </p>
+        )}
+
+        {permission !== "unsupported" && (
+          <label className="flex cursor-pointer items-center justify-between gap-3">
+            <span className="text-sm text-gray-800">
+              Avisarme de mensajes nuevos en otros canales
+            </span>
+            <button
+              role="switch"
+              aria-checked={enabled}
+              onClick={toggleEnabled}
+              className={`relative h-6 w-11 shrink-0 rounded-full transition-colors ${
+                enabled ? "bg-violet-600" : "bg-gray-300"
+              }`}
+            >
+              <span
+                className={`absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition-transform ${
+                  enabled ? "translate-x-5.5" : "translate-x-0.5"
+                }`}
+              />
+            </button>
+          </label>
+        )}
+
+        {ready ? (
+          <button
+            onClick={sendTest}
+            className="flex w-full items-center justify-center gap-2 rounded-lg border border-gray-300 py-2 text-sm text-gray-700 hover:bg-gray-50"
+          >
+            <FiBell size={14} /> Enviar notificación de prueba
+          </button>
+        ) : (
+          permission !== "unsupported" && (
+            <p className="flex items-center gap-2 text-xs text-gray-400">
+              <FiBellOff size={13} /> Ahora mismo no recibirás notificaciones.
+            </p>
+          )
+        )}
+      </div>
+    </Modal>
   );
 }
 
@@ -212,13 +320,25 @@ function SectionHeader({ label, onAdd }: { label: string; onAdd?: () => void }) 
         <button
           onClick={onAdd}
           title={`Añadir ${label.toLowerCase()}`}
-          className="rounded px-1.5 text-violet-300 hover:bg-violet-900"
+          className="rounded p-1 text-violet-300 hover:bg-violet-900 hover:text-white"
         >
-          +
+          <FiPlus size={14} />
         </button>
       )}
     </div>
   );
+}
+
+export function ChannelIcon({
+  type,
+  size = 14,
+}: {
+  type: "public" | "private" | "dm";
+  size?: number;
+}) {
+  if (type === "public") return <FiHash size={size} />;
+  if (type === "private") return <FiLock size={size} />;
+  return <FiAtSign size={size} />;
 }
 
 function ChannelLink({
@@ -230,7 +350,6 @@ function ChannelLink({
   active: boolean;
   onNavigate?: () => void;
 }) {
-  const icon = channel.type === "public" ? "#" : channel.type === "private" ? "🔒" : "@";
   return (
     <li>
       <Link
@@ -244,7 +363,9 @@ function ChannelLink({
               : "text-violet-300 hover:bg-violet-900"
         }`}
       >
-        <span className="w-4 text-center text-violet-400">{icon}</span>
+        <span className="flex w-4 justify-center text-violet-400">
+          <ChannelIcon type={channel.type} />
+        </span>
         <span className="min-w-0 flex-1 truncate">{channel.name}</span>
         {channel.unread > 0 && (
           <span className="rounded-full bg-red-500 px-1.5 py-0.5 text-xs font-bold text-white">
@@ -276,8 +397,8 @@ function Modal({
       >
         <div className="mb-3 flex items-center justify-between">
           <h2 className="text-base font-semibold">{title}</h2>
-          <button onClick={onClose} className="text-gray-400 hover:text-gray-600">
-            ✕
+          <button onClick={onClose} className="p-1 text-gray-400 hover:text-gray-600">
+            <FiX size={16} />
           </button>
         </div>
         {children}

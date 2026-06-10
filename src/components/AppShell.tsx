@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { FiMenu } from "react-icons/fi";
 import Sidebar from "@/components/Sidebar";
 import { SessionUser } from "@/lib/session";
 
@@ -20,9 +21,9 @@ export default function AppShell({
         <button
           onClick={() => setOpen(true)}
           aria-label="Abrir menú"
-          className="rounded p-1 text-xl leading-none text-violet-200 hover:bg-violet-900"
+          className="rounded p-1 text-violet-200 hover:bg-violet-900"
         >
-          ☰
+          <FiMenu size={22} />
         </button>
         <span className="text-lg font-bold text-white">Slak</span>
       </header>

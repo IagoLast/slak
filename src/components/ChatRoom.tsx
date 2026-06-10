@@ -5,6 +5,7 @@ import useSWR from "swr";
 import AddMemberButton from "@/components/AddMemberButton";
 import Composer from "@/components/Composer";
 import MessageItem from "@/components/MessageItem";
+import { ChannelIcon } from "@/components/Sidebar";
 import { ChatMessage, fetcher } from "@/lib/client";
 import { SessionUser } from "@/lib/session";
 
@@ -56,13 +57,13 @@ export default function ChatRoom({
     stickToBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
   }
 
-  const icon = channelType === "public" ? "#" : channelType === "private" ? "🔒" : "@";
-
   return (
     <div className="flex h-full min-h-0 flex-col">
       <header className="flex items-center gap-3 border-b border-gray-200 px-4 py-3 sm:px-5">
-        <h1 className="text-base font-bold text-gray-900">
-          <span className="mr-1 text-gray-400">{icon}</span>
+        <h1 className="flex items-center gap-1.5 text-base font-bold text-gray-900">
+          <span className="text-gray-400">
+            <ChannelIcon type={channelType} size={15} />
+          </span>
           {channelName}
         </h1>
         {channelDescription && (

@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { FiPlus, FiUsers } from "react-icons/fi";
 import useSWR from "swr";
 import { fetcher, Summary } from "@/lib/client";
 
@@ -28,9 +29,9 @@ export default function AddMemberButton({ channelId }: { channelId: string }) {
     <div className="relative ml-auto">
       <button
         onClick={() => setOpen((v) => !v)}
-        className="rounded-lg border border-gray-300 px-2.5 py-1 text-xs text-gray-600 hover:bg-gray-50"
+        className="flex items-center gap-1.5 rounded-lg border border-gray-300 px-2.5 py-1 text-xs text-gray-600 hover:bg-gray-50"
       >
-        👥 Miembros
+        <FiUsers size={13} /> Miembros
       </button>
       {open && (
         <>
@@ -67,7 +68,9 @@ export default function AddMemberButton({ channelId }: { channelId: string }) {
                             <span className="text-xs text-gray-400">externo</span>
                           )}
                         </span>
-                        <span className="text-violet-700">+</span>
+                        <span className="text-violet-700">
+                          <FiPlus size={14} />
+                        </span>
                       </button>
                     </li>
                   ))}

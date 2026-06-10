@@ -1,5 +1,6 @@
 "use client";
 
+import { FiPaperclip } from "react-icons/fi";
 import { ChatMessage } from "@/lib/client";
 
 const timeFormat = new Intl.DateTimeFormat("es", {
@@ -81,7 +82,8 @@ function Attachment({ message }: { message: ChatMessage }) {
       download={name}
       className="mt-1 inline-flex items-center gap-2 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-violet-700 hover:bg-gray-100"
     >
-      📎 <span className="max-w-60 truncate">{name}</span>
+      <FiPaperclip size={14} className="shrink-0" />
+      <span className="max-w-60 truncate">{name}</span>
     </a>
   );
 }

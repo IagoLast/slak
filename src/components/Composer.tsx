@@ -1,6 +1,7 @@
 "use client";
 
 import { useRef, useState } from "react";
+import { FiMic, FiPaperclip, FiSend, FiSquare } from "react-icons/fi";
 
 type Props = {
   channelId: string;
@@ -117,9 +118,9 @@ export default function Composer({ channelId, placeholder, onSent }: Props) {
           onClick={() => fileInputRef.current?.click()}
           disabled={busy || recording}
           title="Adjuntar archivo"
-          className="pb-1 text-lg text-gray-400 hover:text-gray-600 disabled:opacity-40"
+          className="pb-1.5 text-gray-400 hover:text-gray-600 disabled:opacity-40"
         >
-          📎
+          <FiPaperclip size={18} />
         </button>
         <input ref={fileInputRef} type="file" hidden onChange={onPickFile} />
 
@@ -142,19 +143,20 @@ export default function Composer({ channelId, placeholder, onSent }: Props) {
           onClick={toggleRecording}
           disabled={busy && !recording}
           title={recording ? "Detener y enviar" : "Grabar nota de voz"}
-          className={`pb-1 text-lg disabled:opacity-40 ${
+          className={`pb-1.5 disabled:opacity-40 ${
             recording ? "animate-pulse text-red-600" : "text-gray-400 hover:text-gray-600"
           }`}
         >
-          {recording ? "⏹" : "🎤"}
+          {recording ? <FiSquare size={18} /> : <FiMic size={18} />}
         </button>
 
         <button
           onClick={sendText}
           disabled={busy || recording || !text.trim()}
-          className="rounded-lg bg-violet-700 px-3 py-1.5 text-sm font-semibold text-white hover:bg-violet-800 disabled:opacity-40"
+          title="Enviar"
+          className="rounded-lg bg-violet-700 p-2 text-white hover:bg-violet-800 disabled:opacity-40"
         >
-          Enviar
+          <FiSend size={16} />
         </button>
       </div>
     </div>
