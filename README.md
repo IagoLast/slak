@@ -27,11 +27,8 @@ Chat de empresa sencillo, estilo Slack, pensado para desplegarse en Vercel.
    - Un store de **Blob**. Esto añade `BLOB_READ_WRITE_TOKEN` automáticamente.
 3. Añade la variable de entorno `AUTH_SECRET` (genera una con `openssl rand -base64 32`).
 4. Despliega.
-5. Crea las tablas: en tu máquina, con el `DATABASE_URL` de producción en `.env`:
-   ```bash
-   npm install
-   npm run db:push
-   ```
+5. Crea las tablas visitando **`https://tu-app.vercel.app/api/setup`** (es
+   idempotente; también puedes usar `npm run db:push` en local si lo prefieres).
 6. Abre la app, entra en **/register** y crea tu cuenta: el primer usuario es
    administrador y se crea el canal `#general` automáticamente.
 7. Desde **Invitar personas** (barra lateral) genera enlaces para el resto del
