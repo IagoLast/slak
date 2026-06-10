@@ -4,6 +4,7 @@ import { signOut } from "next-auth/react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import {
   FiAtSign,
   FiBell,
@@ -283,8 +284,8 @@ function NotificationSettingsModal({ onClose }: { onClose: () => void }) {
               }`}
             >
               <span
-                className={`absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition-transform ${
-                  enabled ? "translate-x-5.5" : "translate-x-0.5"
+                className={`absolute top-0.5 left-0 h-5 w-5 rounded-full bg-white shadow transition-transform ${
+                  enabled ? "translate-x-[22px]" : "translate-x-0.5"
                 }`}
               />
             </button>
@@ -386,13 +387,16 @@ function Modal({
   onClose: () => void;
   children: React.ReactNode;
 }) {
-  return (
+  // Portal al body: el drawer del sidebar usa transform, que convertiría
+  // este `fixed` en relativo a la columna del sidebar en vez de a la pantalla.
+  if (typeof document === "undefined") return null;
+  return createPortal(
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4"
       onClick={onClose}
     >
       <div
-        className="w-full max-w-sm rounded-xl bg-white p-5 text-gray-900 shadow-xl"
+        className="max-h-[85dvh] w-full max-w-sm overflow-y-auto rounded-xl bg-white p-5 text-gray-900 shadow-xl"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="mb-3 flex items-center justify-between">
@@ -403,7 +407,8 @@ function Modal({
         </div>
         {children}
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
 

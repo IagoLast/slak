@@ -36,21 +36,25 @@ export default function AddMemberButton({ channelId }: { channelId: string }) {
       {open && (
         <>
           <div className="fixed inset-0 z-10" onClick={() => setOpen(false)} />
-          <div className="absolute right-0 z-20 mt-1 w-64 rounded-xl border border-gray-200 bg-white p-3 shadow-lg">
+          <div className="absolute right-0 z-20 mt-1 w-64 max-w-[calc(100vw-1.5rem)] rounded-xl border border-gray-200 bg-white p-3 shadow-lg">
             <p className="mb-2 text-xs font-semibold text-gray-500 uppercase">
               En este canal
             </p>
-            <ul className="mb-3 max-h-40 space-y-1 overflow-y-auto">
-              {membersData?.members.map((m) => (
-                <li key={m.id} className="flex items-center gap-2 text-sm text-gray-800">
-                  {m.name}
-                  {m.role === "guest" && (
-                    <span className="text-xs text-gray-400">externo</span>
-                  )}
-                </li>
-              ))}
-            </ul>
-            {candidates.length > 0 && (
+            {!membersData ? (
+              <p className="mb-3 text-sm text-gray-400">Cargando…</p>
+            ) : (
+              <ul className="mb-3 max-h-40 space-y-1 overflow-y-auto">
+                {membersData.members.map((m) => (
+                  <li key={m.id} className="flex items-center gap-2 text-sm text-gray-800">
+                    {m.name}
+                    {m.role === "guest" && (
+                      <span className="text-xs text-gray-400">externo</span>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            )}
+            {membersData && candidates.length > 0 && (
               <>
                 <p className="mb-2 text-xs font-semibold text-gray-500 uppercase">
                   Añadir
