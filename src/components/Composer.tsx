@@ -106,7 +106,7 @@ export default function Composer({ channelId, placeholder, onSent }: Props) {
   }
 
   return (
-    <div className="border-t border-gray-200 px-5 py-3">
+    <div className="border-t border-gray-200 px-3 py-3 sm:px-5">
       {error && <p className="mb-2 text-sm text-red-600">{error}</p>}
       <div
         className={`flex items-end gap-2 rounded-xl border px-3 py-2 ${
@@ -135,7 +135,7 @@ export default function Composer({ channelId, placeholder, onSent }: Props) {
               sendText();
             }
           }}
-          className="max-h-40 flex-1 resize-none bg-transparent py-1 text-sm outline-none"
+          className="max-h-40 flex-1 resize-none bg-transparent py-1 text-base outline-none sm:text-sm"
         />
 
         <button

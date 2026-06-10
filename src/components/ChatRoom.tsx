@@ -60,7 +60,7 @@ export default function ChatRoom({
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <header className="flex items-center gap-3 border-b border-gray-200 px-5 py-3">
+      <header className="flex items-center gap-3 border-b border-gray-200 px-4 py-3 sm:px-5">
         <h1 className="text-base font-bold text-gray-900">
           <span className="mr-1 text-gray-400">{icon}</span>
           {channelName}
@@ -78,7 +78,7 @@ export default function ChatRoom({
       <div
         ref={scrollRef}
         onScroll={onScroll}
-        className="flex-1 overflow-y-auto px-5 py-4"
+        className="flex-1 overflow-y-auto px-3 py-4 sm:px-5"
       >
         {messages.length === 0 && (
           <p className="mt-10 text-center text-sm text-gray-400">

@@ -1,4 +1,4 @@
-import Sidebar from "@/components/Sidebar";
+import AppShell from "@/components/AppShell";
 import { requireUser } from "@/lib/session";
 
 export default async function AppLayout({
@@ -8,10 +8,5 @@ export default async function AppLayout({
 }) {
   const user = await requireUser();
 
-  return (
-    <div className="flex h-full">
-      <Sidebar currentUser={user} />
-      <main className="flex min-w-0 flex-1 flex-col">{children}</main>
-    </div>
-  );
+  return <AppShell currentUser={user}>{children}</AppShell>;
 }

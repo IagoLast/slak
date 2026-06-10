@@ -8,7 +8,13 @@ import useSWR from "swr";
 import { fetcher, Summary, SummaryChannel } from "@/lib/client";
 import { SessionUser } from "@/lib/session";
 
-export default function Sidebar({ currentUser }: { currentUser: SessionUser }) {
+export default function Sidebar({
+  currentUser,
+  onNavigate,
+}: {
+  currentUser: SessionUser;
+  onNavigate?: () => void;
+}) {
   const router = useRouter();
   const pathname = usePathname();
   const activeChannelId = pathname.startsWith("/c/") ? pathname.slice(3) : null;
@@ -59,6 +65,7 @@ export default function Sidebar({ currentUser }: { currentUser: SessionUser }) {
 
   async function openDm(userId: string) {
     setShowDmPicker(false);
+    onNavigate?.();
     const res = await fetch("/api/dms", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -76,7 +83,7 @@ export default function Sidebar({ currentUser }: { currentUser: SessionUser }) {
   const otherUsers = data?.users.filter((u) => u.id !== currentUser.id) ?? [];
 
   return (
-    <aside className="flex w-64 shrink-0 flex-col bg-violet-950 text-violet-100">
+    <aside className="flex h-full w-72 shrink-0 flex-col bg-violet-950 text-violet-100 md:w-64">
       <div className="flex items-center justify-between border-b border-violet-900 px-4 py-3">
         <span className="text-lg font-bold text-white">Slak</span>
         {!notifReady && (
@@ -97,7 +104,12 @@ export default function Sidebar({ currentUser }: { currentUser: SessionUser }) {
         />
         <ul>
           {channels.map((channel) => (
-            <ChannelLink key={channel.id} channel={channel} active={channel.id === activeChannelId} />
+            <ChannelLink
+              key={channel.id}
+              channel={channel}
+              active={channel.id === activeChannelId}
+              onNavigate={onNavigate}
+            />
           ))}
         </ul>
 
@@ -105,7 +117,12 @@ export default function Sidebar({ currentUser }: { currentUser: SessionUser }) {
         <SectionHeader label="Mensajes directos" onAdd={() => setShowDmPicker(true)} />
         <ul>
           {dms.map((channel) => (
-            <ChannelLink key={channel.id} channel={channel} active={channel.id === activeChannelId} />
+            <ChannelLink
+              key={channel.id}
+              channel={channel}
+              active={channel.id === activeChannelId}
+              onNavigate={onNavigate}
+            />
           ))}
         </ul>
 
@@ -113,6 +130,7 @@ export default function Sidebar({ currentUser }: { currentUser: SessionUser }) {
           <div className="mt-6 border-t border-violet-900 pt-3">
             <Link
               href="/invites"
+              onClick={onNavigate}
               className={`block rounded px-2 py-1.5 text-sm hover:bg-violet-900 ${
                 pathname === "/invites" ? "bg-violet-800 text-white" : "text-violet-300"
               }`}
@@ -147,6 +165,7 @@ export default function Sidebar({ currentUser }: { currentUser: SessionUser }) {
           onClose={() => setShowNewChannel(false)}
           onCreated={(id) => {
             setShowNewChannel(false);
+            onNavigate?.();
             mutate();
             router.push(`/c/${id}`);
           }}
@@ -202,12 +221,21 @@ function SectionHeader({ label, onAdd }: { label: string; onAdd?: () => void }) 
   );
 }
 
-function ChannelLink({ channel, active }: { channel: SummaryChannel; active: boolean }) {
+function ChannelLink({
+  channel,
+  active,
+  onNavigate,
+}: {
+  channel: SummaryChannel;
+  active: boolean;
+  onNavigate?: () => void;
+}) {
   const icon = channel.type === "public" ? "#" : channel.type === "private" ? "🔒" : "@";
   return (
     <li>
       <Link
         href={`/c/${channel.id}`}
+        onClick={onNavigate}
         className={`flex items-center gap-2 rounded px-2 py-1.5 text-sm ${
           active
             ? "bg-violet-800 font-semibold text-white"
@@ -292,7 +320,7 @@ function NewChannelModal({
           placeholder="nombre-del-canal"
           value={name}
           onChange={(e) => setName(e.target.value)}
-          className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm outline-none focus:border-violet-500"
+          className="w-full rounded-lg border border-gray-300 px-3 py-2 text-base outline-none sm:text-sm focus:border-violet-500"
         />
         <label className="flex items-center gap-2 text-sm text-gray-700">
           <input

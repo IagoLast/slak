@@ -73,7 +73,7 @@ export default function InviteManager() {
             value={email}
             onChange={(e) => setEmail(e.target.value)}
             placeholder="persona@empresa.com"
-            className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm outline-none focus:border-violet-500"
+            className="w-full rounded-lg border border-gray-300 px-3 py-2 text-base outline-none sm:text-sm focus:border-violet-500"
           />
         </div>
 
