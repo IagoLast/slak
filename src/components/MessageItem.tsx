@@ -1,6 +1,7 @@
 "use client";
 
 import { FiPaperclip } from "react-icons/fi";
+import MessageContent from "@/components/MessageContent";
 import { ChatMessage } from "@/lib/client";
 
 const timeFormat = new Intl.DateTimeFormat("es", {
@@ -48,9 +49,7 @@ export default function MessageItem({
             </span>
           </p>
         )}
-        {message.content && (
-          <p className="text-sm whitespace-pre-wrap text-gray-800">{message.content}</p>
-        )}
+        {message.content && <MessageContent content={message.content} />}
         {message.attachmentUrl && <Attachment message={message} />}
       </div>
     </div>

@@ -159,6 +159,10 @@ export default function Composer({ channelId, placeholder, onSent }: Props) {
           <FiSend size={16} />
         </button>
       </div>
+      <p className="mt-1 hidden text-[11px] text-gray-400 sm:block">
+        **negrita** · _cursiva_ · ~~tachado~~ · `código` · ```bloque de código``` ·
+        &gt; cita · Shift+Enter para salto de línea
+      </p>
     </div>
   );
 }
