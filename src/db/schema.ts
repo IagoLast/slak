@@ -81,6 +81,42 @@ export const invites = pgTable("invites", {
   usedAt: timestamp("used_at", { withTimezone: true }),
 });
 
+// Participantes activos de un huddle (llamada de audio) por canal.
+// Un participante se considera caído si last_seen_at queda obsoleto.
+export const huddleParticipants = pgTable(
+  "huddle_participants",
+  {
+    channelId: text("channel_id")
+      .notNull()
+      .references(() => channels.id, { onDelete: "cascade" }),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    joinedAt: timestamp("joined_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    lastSeenAt: timestamp("last_seen_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [primaryKey({ columns: [t.channelId, t.userId] })],
+);
+
+// Señalización WebRTC (ofertas, respuestas y candidatos ICE) entre pares.
+// Los mensajes se borran al ser entregados.
+export const huddleSignals = pgTable("huddle_signals", {
+  id: text("id").primaryKey(),
+  channelId: text("channel_id")
+    .notNull()
+    .references(() => channels.id, { onDelete: "cascade" }),
+  fromUserId: text("from_user_id").notNull(),
+  toUserId: text("to_user_id").notNull(),
+  payload: jsonb("payload").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+});
+
 export type User = typeof users.$inferSelect;
 export type Channel = typeof channels.$inferSelect;
 export type Message = typeof messages.$inferSelect;

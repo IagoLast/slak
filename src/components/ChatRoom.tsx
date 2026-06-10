@@ -4,6 +4,7 @@ import { useEffect, useRef } from "react";
 import useSWR from "swr";
 import AddMemberButton from "@/components/AddMemberButton";
 import Composer from "@/components/Composer";
+import Huddle from "@/components/Huddle";
 import MessageItem from "@/components/MessageItem";
 import { ChannelIcon } from "@/components/Sidebar";
 import { ChatMessage, fetcher } from "@/lib/client";
@@ -71,9 +72,12 @@ export default function ChatRoom({
             {channelDescription}
           </p>
         )}
-        {channelType !== "dm" && currentUser.role !== "guest" && (
-          <AddMemberButton channelId={channelId} />
-        )}
+        <div className="ml-auto flex items-center gap-2">
+          <Huddle channelId={channelId} userId={currentUser.id} />
+          {channelType !== "dm" && currentUser.role !== "guest" && (
+            <AddMemberButton channelId={channelId} />
+          )}
+        </div>
       </header>
 
       <div

@@ -40,6 +40,23 @@ const statements = [
   )`,
   sql`CREATE INDEX IF NOT EXISTS "messages_channel_created_idx"
     ON "messages" ("channel_id", "created_at")`,
+  sql`CREATE TABLE IF NOT EXISTS "huddle_participants" (
+    "channel_id" text NOT NULL REFERENCES "channels"("id") ON DELETE CASCADE,
+    "user_id" text NOT NULL REFERENCES "users"("id") ON DELETE CASCADE,
+    "joined_at" timestamptz NOT NULL DEFAULT now(),
+    "last_seen_at" timestamptz NOT NULL DEFAULT now(),
+    PRIMARY KEY ("channel_id", "user_id")
+  )`,
+  sql`CREATE TABLE IF NOT EXISTS "huddle_signals" (
+    "id" text PRIMARY KEY,
+    "channel_id" text NOT NULL REFERENCES "channels"("id") ON DELETE CASCADE,
+    "from_user_id" text NOT NULL,
+    "to_user_id" text NOT NULL,
+    "payload" jsonb NOT NULL,
+    "created_at" timestamptz NOT NULL DEFAULT now()
+  )`,
+  sql`CREATE INDEX IF NOT EXISTS "huddle_signals_to_idx"
+    ON "huddle_signals" ("channel_id", "to_user_id")`,
   sql`CREATE TABLE IF NOT EXISTS "invites" (
     "token" text PRIMARY KEY,
     "email" text,

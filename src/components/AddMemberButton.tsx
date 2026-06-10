@@ -26,7 +26,7 @@ export default function AddMemberButton({ channelId }: { channelId: string }) {
   }
 
   return (
-    <div className="relative ml-auto">
+    <div className="relative">
       <button
         onClick={() => setOpen((v) => !v)}
         className="flex items-center gap-1.5 rounded-lg border border-gray-300 px-2.5 py-1 text-xs text-gray-600 hover:bg-gray-50"
