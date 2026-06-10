@@ -4,12 +4,14 @@ import { useRef, useState } from "react";
 import { FiMic, FiPaperclip, FiSend, FiSquare } from "react-icons/fi";
 
 type Props = {
-  channelId: string;
+  /** URL del POST de mensajes: canal o hilo. */
+  endpoint: string;
   placeholder: string;
+  compact?: boolean;
   onSent: () => void;
 };
 
-export default function Composer({ channelId, placeholder, onSent }: Props) {
+export default function Composer({ endpoint, placeholder, compact, onSent }: Props) {
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -21,7 +23,7 @@ export default function Composer({ channelId, placeholder, onSent }: Props) {
     setBusy(true);
     setError(null);
     try {
-      const res = await fetch(`/api/channels/${channelId}/messages`, {
+      const res = await fetch(endpoint, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
@@ -159,10 +161,12 @@ export default function Composer({ channelId, placeholder, onSent }: Props) {
           <FiSend size={16} />
         </button>
       </div>
-      <p className="mt-1 hidden text-[11px] text-gray-400 sm:block">
-        **negrita** · _cursiva_ · ~~tachado~~ · `código` · ```bloque de código``` ·
-        &gt; cita · Shift+Enter para salto de línea
-      </p>
+      {!compact && (
+        <p className="mt-1 hidden text-[11px] text-gray-400 sm:block">
+          **negrita** · _cursiva_ · ~~tachado~~ · `código` · ```bloque de código``` ·
+          &gt; cita · Shift+Enter para salto de línea
+        </p>
+      )}
     </div>
   );
 }

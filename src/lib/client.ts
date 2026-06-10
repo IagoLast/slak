@@ -31,5 +31,6 @@ export type ChatMessage = {
   attachmentName: string | null;
   attachmentType: "file" | "image" | "audio" | null;
   createdAt: string;
+  replyCount?: number;
   user: { id: string; name: string };
 };

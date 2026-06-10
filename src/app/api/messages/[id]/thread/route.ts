@@ -1,26 +1,47 @@
-import { and, asc, desc, eq, gt, isNull, sql } from "drizzle-orm";
+import { and, asc, eq, isNull } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { NextResponse } from "next/server";
 import { db } from "@/db";
 import { messages, users } from "@/db/schema";
 import { getAccessibleChannel, markChannelRead } from "@/lib/channels";
-import { getSessionUser } from "@/lib/session";
+import { getSessionUser, SessionUser } from "@/lib/session";
 
-type Params = { params: Promise<{ id: string }> };
+async function getThreadRoot(user: SessionUser, messageId: string) {
+  const [root] = await db
+    .select({
+      id: messages.id,
+      channelId: messages.channelId,
+      content: messages.content,
+      attachmentUrl: messages.attachmentUrl,
+      attachmentName: messages.attachmentName,
+      attachmentType: messages.attachmentType,
+      createdAt: messages.createdAt,
+      user: { id: users.id, name: users.name },
+    })
+    .from(messages)
+    .innerJoin(users, eq(users.id, messages.userId))
+    .where(and(eq(messages.id, messageId), isNull(messages.parentId)))
+    .limit(1);
+  if (!root) return null;
 
-export async function GET(req: Request, { params }: Params) {
+  const channel = await getAccessibleChannel(user, root.channelId);
+  return channel ? root : null;
+}
+
+export async function GET(
+  _req: Request,
+  { params }: { params: Promise<{ id: string }> },
+) {
   const user = await getSessionUser();
   if (!user) return NextResponse.json({ error: "No autenticado" }, { status: 401 });
 
   const { id } = await params;
-  const channel = await getAccessibleChannel(user, id);
-  if (!channel) {
-    return NextResponse.json({ error: "Canal no encontrado" }, { status: 404 });
+  const root = await getThreadRoot(user, id);
+  if (!root) {
+    return NextResponse.json({ error: "Hilo no encontrado" }, { status: 404 });
   }
 
-  const after = new URL(req.url).searchParams.get("after");
-  // Solo mensajes principales; las respuestas viven en su hilo.
-  const baseQuery = db
+  const replies = await db
     .select({
       id: messages.id,
       content: messages.content,
@@ -28,41 +49,27 @@ export async function GET(req: Request, { params }: Params) {
       attachmentName: messages.attachmentName,
       attachmentType: messages.attachmentType,
       createdAt: messages.createdAt,
-      replyCount: sql<number>`(select count(*)::int from "messages" r where r."parent_id" = ${messages.id})`,
       user: { id: users.id, name: users.name },
     })
     .from(messages)
-    .innerJoin(users, eq(users.id, messages.userId));
+    .innerJoin(users, eq(users.id, messages.userId))
+    .where(eq(messages.parentId, id))
+    .orderBy(asc(messages.createdAt));
 
-  if (after) {
-    const rows = await baseQuery
-      .where(
-        and(
-          eq(messages.channelId, id),
-          isNull(messages.parentId),
-          gt(messages.createdAt, new Date(after)),
-        ),
-      )
-      .orderBy(asc(messages.createdAt));
-    return NextResponse.json({ messages: rows });
-  }
-
-  // Carga inicial: últimos 200 mensajes en orden cronológico.
-  const rows = await baseQuery
-    .where(and(eq(messages.channelId, id), isNull(messages.parentId)))
-    .orderBy(desc(messages.createdAt))
-    .limit(200);
-  return NextResponse.json({ messages: rows.reverse() });
+  return NextResponse.json({ root, replies });
 }
 
-export async function POST(req: Request, { params }: Params) {
+export async function POST(
+  req: Request,
+  { params }: { params: Promise<{ id: string }> },
+) {
   const user = await getSessionUser();
   if (!user) return NextResponse.json({ error: "No autenticado" }, { status: 401 });
 
   const { id } = await params;
-  const channel = await getAccessibleChannel(user, id);
-  if (!channel) {
-    return NextResponse.json({ error: "Canal no encontrado" }, { status: 404 });
+  const root = await getThreadRoot(user, id);
+  if (!root) {
+    return NextResponse.json({ error: "Hilo no encontrado" }, { status: 404 });
   }
 
   const body = await req.json().catch(() => null);
@@ -80,14 +87,15 @@ export async function POST(req: Request, { params }: Params) {
   const messageId = nanoid();
   await db.insert(messages).values({
     id: messageId,
-    channelId: id,
+    channelId: root.channelId,
     userId: user.id,
+    parentId: id,
     content,
     attachmentUrl,
     attachmentName,
     attachmentType: attachmentUrl ? (attachmentType ?? "file") : null,
   });
-  await markChannelRead(user.id, id);
+  await markChannelRead(user.id, root.channelId);
 
   return NextResponse.json({ id: messageId });
 }

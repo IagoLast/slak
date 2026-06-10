@@ -56,6 +56,8 @@ export const messages = pgTable("messages", {
   userId: text("user_id")
     .notNull()
     .references(() => users.id, { onDelete: "cascade" }),
+  // Si apunta a otro mensaje, este mensaje es una respuesta de su hilo.
+  parentId: text("parent_id"),
   content: text("content"),
   attachmentUrl: text("attachment_url"),
   attachmentName: text("attachment_name"),

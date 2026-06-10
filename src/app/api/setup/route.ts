@@ -32,6 +32,7 @@ const statements = [
     "id" text PRIMARY KEY,
     "channel_id" text NOT NULL REFERENCES "channels"("id") ON DELETE CASCADE,
     "user_id" text NOT NULL REFERENCES "users"("id") ON DELETE CASCADE,
+    "parent_id" text,
     "content" text,
     "attachment_url" text,
     "attachment_name" text,
@@ -40,6 +41,9 @@ const statements = [
   )`,
   sql`CREATE INDEX IF NOT EXISTS "messages_channel_created_idx"
     ON "messages" ("channel_id", "created_at")`,
+  // Para instalaciones anteriores a los hilos.
+  sql`ALTER TABLE "messages" ADD COLUMN IF NOT EXISTS "parent_id" text`,
+  sql`CREATE INDEX IF NOT EXISTS "messages_parent_idx" ON "messages" ("parent_id")`,
   sql`CREATE TABLE IF NOT EXISTS "huddle_participants" (
     "channel_id" text NOT NULL REFERENCES "channels"("id") ON DELETE CASCADE,
     "user_id" text NOT NULL REFERENCES "users"("id") ON DELETE CASCADE,
