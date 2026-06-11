@@ -38,6 +38,11 @@ export default function ChannelPage() {
     );
   }
 
+  const dmOnline =
+    channel.type === "dm" && channel.dmUserId
+      ? data.users.find((u) => u.id === channel.dmUserId)?.online
+      : undefined;
+
   return (
     <ChatRoom
       key={channel.id}
@@ -45,6 +50,7 @@ export default function ChannelPage() {
       channelName={channel.name}
       channelType={channel.type}
       channelDescription={channel.description}
+      dmOnline={dmOnline}
       currentUser={data.user}
     />
   );

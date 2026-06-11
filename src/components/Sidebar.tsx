@@ -42,6 +42,8 @@ export default function Sidebar({
 
   const { data, mutate } = useSWR<Summary>("/api/me/summary", fetcher, {
     refreshInterval: 5000,
+    // Seguir latiendo con la pestaña en segundo plano para mantener la presencia.
+    refreshWhenHidden: true,
   });
 
   const [showNewChannel, setShowNewChannel] = useState(false);
@@ -94,6 +96,7 @@ export default function Sidebar({
   const channels = data?.channels.filter((c) => c.type !== "dm") ?? [];
   const dms = data?.channels.filter((c) => c.type === "dm") ?? [];
   const otherUsers = data?.users.filter((u) => u.id !== currentUser.id) ?? [];
+  const onlineById = new Map((data?.users ?? []).map((u) => [u.id, u.online]));
 
   return (
     <aside className="flex h-full w-72 shrink-0 flex-col bg-violet-950 text-violet-100 md:w-64">
@@ -132,6 +135,7 @@ export default function Sidebar({
               key={channel.id}
               channel={channel}
               active={channel.id === activeChannelId}
+              online={channel.dmUserId ? onlineById.get(channel.dmUserId) : undefined}
               onNavigate={onNavigate}
             />
           ))}
@@ -200,6 +204,7 @@ export default function Sidebar({
                       {u.name.slice(0, 1).toUpperCase()}
                     </span>
                     {u.name}
+                    <PresenceDot online={u.online} />
                     {u.role === "guest" && (
                       <span className="ml-auto text-xs text-gray-400">externo</span>
                     )}
@@ -343,13 +348,26 @@ export function ChannelIcon({
   return <FiAtSign size={size} />;
 }
 
+export function PresenceDot({ online }: { online?: boolean }) {
+  return (
+    <span
+      title={online ? "En línea" : "Desconectado"}
+      className={`inline-block h-2 w-2 shrink-0 rounded-full ${
+        online ? "bg-green-500" : "border border-gray-400 bg-transparent"
+      }`}
+    />
+  );
+}
+
 function ChannelLink({
   channel,
   active,
+  online,
   onNavigate,
 }: {
   channel: SummaryChannel;
   active: boolean;
+  online?: boolean;
   onNavigate?: () => void;
 }) {
   return (
@@ -366,8 +384,12 @@ function ChannelLink({
               : "text-violet-300 hover:bg-violet-900"
         }`}
       >
-        <span className="flex w-4 justify-center text-violet-400">
-          <ChannelIcon type={channel.type} />
+        <span className="flex w-4 items-center justify-center text-violet-400">
+          {channel.type === "dm" ? (
+            <PresenceDot online={online} />
+          ) : (
+            <ChannelIcon type={channel.type} />
+          )}
         </span>
         <span className="min-w-0 flex-1 truncate">{channel.name}</span>
         {channel.unread > 0 && (

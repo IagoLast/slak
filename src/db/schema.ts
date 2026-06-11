@@ -15,6 +15,10 @@ export const users = pgTable("users", {
   role: text("role", { enum: ["admin", "member", "guest"] })
     .notNull()
     .default("member"),
+  // Latido de presencia: se actualiza con cada poll del resumen.
+  lastSeenAt: timestamp("last_seen_at", { withTimezone: true })
+    .notNull()
+    .defaultNow(),
   createdAt: timestamp("created_at", { withTimezone: true })
     .notNull()
     .defaultNow(),

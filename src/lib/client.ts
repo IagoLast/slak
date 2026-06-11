@@ -18,6 +18,7 @@ export type SummaryUser = {
   id: string;
   name: string;
   role: "admin" | "member" | "guest";
+  online: boolean;
 };
 
 export type Summary = {

@@ -13,6 +13,12 @@ export async function GET() {
   const user = await getSessionUser();
   if (!user) return NextResponse.json({ error: "No autenticado" }, { status: 401 });
 
+  // Cada poll del resumen actúa como latido de presencia.
+  await db
+    .update(users)
+    .set({ lastSeenAt: new Date() })
+    .where(eq(users.id, user.id));
+
   const memberships = await db
     .select({ channelId: channelMembers.channelId })
     .from(channelMembers)
@@ -103,10 +109,24 @@ export async function GET() {
     dmPartners.map((p) => [p.channelId, { id: p.userId, name: p.name }]),
   );
 
-  const allUsers = await db
-    .select({ id: users.id, name: users.name, role: users.role })
-    .from(users)
-    .orderBy(asc(users.name));
+  const PRESENCE_MS = 20_000;
+  const presenceCutoff = Date.now() - PRESENCE_MS;
+  const allUsers = (
+    await db
+      .select({
+        id: users.id,
+        name: users.name,
+        role: users.role,
+        lastSeenAt: users.lastSeenAt,
+      })
+      .from(users)
+      .orderBy(asc(users.name))
+  ).map((u) => ({
+    id: u.id,
+    name: u.name,
+    role: u.role,
+    online: u.lastSeenAt.getTime() > presenceCutoff,
+  }));
 
   return NextResponse.json({
     user,

@@ -72,6 +72,8 @@ const STATEMENTS = [
     "created_at" timestamptz NOT NULL DEFAULT now(),
     "used_at" timestamptz
   )`,
+  // Presencia online/offline.
+  sql`ALTER TABLE "users" ADD COLUMN IF NOT EXISTS "last_seen_at" timestamptz NOT NULL DEFAULT now()`,
 ];
 
 const SCHEMA_VERSION = STATEMENTS.length;

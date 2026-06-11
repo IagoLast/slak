@@ -6,7 +6,7 @@ import AddMemberButton from "@/components/AddMemberButton";
 import Composer from "@/components/Composer";
 import Huddle from "@/components/Huddle";
 import MessageItem from "@/components/MessageItem";
-import { ChannelIcon } from "@/components/Sidebar";
+import { ChannelIcon, PresenceDot } from "@/components/Sidebar";
 import ThreadPanel from "@/components/ThreadPanel";
 import { ChatMessage, fetcher, MessagePayload } from "@/lib/client";
 import { SessionUser } from "@/lib/session";
@@ -16,6 +16,7 @@ type Props = {
   channelName: string;
   channelType: "public" | "private" | "dm";
   channelDescription: string | null;
+  dmOnline?: boolean;
   currentUser: SessionUser;
 };
 
@@ -24,6 +25,7 @@ export default function ChatRoom({
   channelName,
   channelType,
   channelDescription,
+  dmOnline,
   currentUser,
 }: Props) {
   const { data, mutate } = useSWR<{ messages: ChatMessage[] }>(
@@ -109,6 +111,12 @@ export default function ChatRoom({
               <ChannelIcon type={channelType} size={15} />
             </span>
             {channelName}
+            {channelType === "dm" && (
+              <span className="ml-1 flex items-center gap-1 text-xs font-normal text-gray-500">
+                <PresenceDot online={dmOnline} />
+                {dmOnline ? "En línea" : "Desconectado"}
+              </span>
+            )}
           </h1>
           {channelDescription && (
             <p className="hidden truncate text-sm text-gray-500 sm:block">
