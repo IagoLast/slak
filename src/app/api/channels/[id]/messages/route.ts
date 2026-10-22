@@ -1,4 +1,5 @@
 import { and, asc, desc, eq, gt, isNull, sql } from "drizzle-orm";
+import { queueAgentMessages } from "@/lib/agents";
 import { nanoid } from "nanoid";
 import { NextResponse } from "next/server";
 import { db } from "@/db";
@@ -10,7 +11,8 @@ type Params = { params: Promise<{ id: string }> };
 
 export async function GET(req: Request, { params }: Params) {
   const user = await getSessionUser();
-  if (!user) return NextResponse.json({ error: "No autenticado" }, { status: 401 });
+  if (!user)
+    return NextResponse.json({ error: "No autenticado" }, { status: 401 });
 
   const { id } = await params;
   const channel = await getAccessibleChannel(user, id);
@@ -29,7 +31,7 @@ export async function GET(req: Request, { params }: Params) {
       attachmentType: messages.attachmentType,
       createdAt: messages.createdAt,
       replyCount: sql<number>`(select count(*)::int from "messages" r where r."parent_id" = ${messages.id})`,
-      user: { id: users.id, name: users.name },
+      user: { id: users.id, name: users.name, kind: users.kind },
     })
     .from(messages)
     .innerJoin(users, eq(users.id, messages.userId));
@@ -57,7 +59,8 @@ export async function GET(req: Request, { params }: Params) {
 
 export async function POST(req: Request, { params }: Params) {
   const user = await getSessionUser();
-  if (!user) return NextResponse.json({ error: "No autenticado" }, { status: 401 });
+  if (!user)
+    return NextResponse.json({ error: "No autenticado" }, { status: 401 });
 
   const { id } = await params;
   const channel = await getAccessibleChannel(user, id);
@@ -68,8 +71,12 @@ export async function POST(req: Request, { params }: Params) {
   const body = await req.json().catch(() => null);
   const content = body?.content ? String(body.content).trim() : null;
   const attachmentUrl = body?.attachmentUrl ? String(body.attachmentUrl) : null;
-  const attachmentName = body?.attachmentName ? String(body.attachmentName) : null;
-  const attachmentType = ["file", "image", "audio"].includes(body?.attachmentType)
+  const attachmentName = body?.attachmentName
+    ? String(body.attachmentName)
+    : null;
+  const attachmentType = ["file", "image", "audio"].includes(
+    body?.attachmentType,
+  )
     ? (body.attachmentType as "file" | "image" | "audio")
     : null;
 
@@ -78,14 +85,17 @@ export async function POST(req: Request, { params }: Params) {
   }
 
   const messageId = nanoid();
-  await db.insert(messages).values({
-    id: messageId,
-    channelId: id,
-    userId: user.id,
-    content,
-    attachmentUrl,
-    attachmentName,
-    attachmentType: attachmentUrl ? (attachmentType ?? "file") : null,
+  await db.transaction(async (tx) => {
+    await tx.insert(messages).values({
+      id: messageId,
+      channelId: id,
+      userId: user.id,
+      content,
+      attachmentUrl,
+      attachmentName,
+      attachmentType: attachmentUrl ? (attachmentType ?? "file") : null,
+    });
+    await queueAgentMessages(tx, { user, channelId: id, messageId, content });
   });
   await markChannelRead(user.id, id);
 

@@ -2,6 +2,9 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import useSWR from "swr";
+import AgentTaskDialog from "@/components/AgentTaskDialog";
+import TaskList from "@/components/TaskList";
+import { Skeleton } from "@/components/ui/skeleton";
 import AddMemberButton from "@/components/AddMemberButton";
 import Composer from "@/components/Composer";
 import Huddle from "@/components/Huddle";
@@ -28,7 +31,7 @@ export default function ChatRoom({
   dmOnline,
   currentUser,
 }: Props) {
-  const { data, mutate } = useSWR<{ messages: ChatMessage[] }>(
+  const { data, error, mutate } = useSWR<{ messages: ChatMessage[] }>(
     `/api/channels/${channelId}/messages`,
     fetcher,
     { refreshInterval: 2500 },
@@ -59,7 +62,8 @@ export default function ChatRoom({
   function onScroll() {
     const el = scrollRef.current;
     if (!el) return;
-    stickToBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+    stickToBottom.current =
+      el.scrollHeight - el.scrollTop - el.clientHeight < 80;
   }
 
   // Envío optimista: el mensaje aparece al instante y la revalidación
@@ -105,25 +109,26 @@ export default function ChatRoom({
   return (
     <div className="flex h-full min-h-0">
       <div className="flex h-full min-h-0 min-w-0 flex-1 flex-col">
-        <header className="flex items-center gap-3 border-b border-gray-200 px-4 py-3 sm:px-5">
-          <h1 className="flex items-center gap-1.5 text-base font-bold text-gray-900">
-            <span className="text-gray-400">
+        <header className="flex items-center gap-3 border-b border-border px-4 py-3 sm:px-5">
+          <h1 className="flex items-center gap-1.5 text-base font-bold text-foreground">
+            <span className="text-muted-foreground">
               <ChannelIcon type={channelType} size={15} />
             </span>
             {channelName}
             {channelType === "dm" && (
-              <span className="ml-1 flex items-center gap-1 text-xs font-normal text-gray-500">
+              <span className="ml-1 flex items-center gap-1 text-xs font-normal text-muted-foreground">
                 <PresenceDot online={dmOnline} />
                 {dmOnline ? "En línea" : "Desconectado"}
               </span>
             )}
           </h1>
           {channelDescription && (
-            <p className="hidden truncate text-sm text-gray-500 sm:block">
+            <p className="hidden truncate text-sm text-muted-foreground sm:block">
               {channelDescription}
             </p>
           )}
           <div className="ml-auto flex items-center gap-2">
+            <AgentTaskDialog channelId={channelId} />
             <Huddle
               channelId={channelId}
               channelName={channelName}
@@ -135,13 +140,20 @@ export default function ChatRoom({
           </div>
         </header>
 
+        <TaskList channelId={channelId} compact />
         <div
           ref={scrollRef}
           onScroll={onScroll}
           className="flex-1 overflow-y-auto px-3 py-4 sm:px-5"
         >
-          {messages.length === 0 && (
-            <p className="mt-10 text-center text-sm text-gray-400">
+          {error && (
+            <p role="alert" className="text-sm text-destructive">
+              No se pudieron cargar los mensajes.
+            </p>
+          )}
+          {!data && !error && <Skeleton className="h-16 w-full" />}
+          {data && messages.length === 0 && (
+            <p className="mt-10 text-center text-sm text-muted-foreground">
               No hay mensajes todavía. ¡Escribe el primero!
             </p>
           )}
@@ -164,8 +176,11 @@ export default function ChatRoom({
 
         <Composer
           placeholder={
-            channelType === "dm" ? `Mensaje a ${channelName}` : `Mensaje a #${channelName}`
+            channelType === "dm"
+              ? `Mensaje a ${channelName}`
+              : `Mensaje a #${channelName}`
           }
+          channelId={channelId}
           onSend={sendMessage}
         />
       </div>

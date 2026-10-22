@@ -1,10 +1,15 @@
 "use client";
-
 import { useState } from "react";
-import { FiMenu } from "react-icons/fi";
+import { Menu } from "lucide-react";
 import Sidebar from "@/components/Sidebar";
-import { SessionUser } from "@/lib/session";
-
+import type { SessionUser } from "@/lib/session";
+import { Button } from "@/components/ui/button";
+import {
+  Sheet,
+  SheetContent,
+  SheetTitle,
+  SheetDescription,
+} from "@/components/ui/sheet";
 export default function AppShell({
   currentUser,
   children,
@@ -13,36 +18,38 @@ export default function AppShell({
   children: React.ReactNode;
 }) {
   const [open, setOpen] = useState(false);
-
   return (
-    <div className="flex h-dvh flex-col md:flex-row">
-      {/* Barra superior solo en móvil */}
-      <header className="flex shrink-0 items-center gap-3 bg-violet-950 px-4 py-3 md:hidden">
-        <button
-          onClick={() => setOpen(true)}
+    <div className="flex h-dvh flex-col bg-background md:flex-row">
+      <header className="flex items-center gap-3 border-b px-3 py-2 md:hidden">
+        <Button
+          variant="ghost"
+          size="icon"
           aria-label="Abrir menú"
-          className="rounded p-1 text-violet-200 hover:bg-violet-900"
+          onClick={() => setOpen(true)}
         >
-          <FiMenu size={22} />
-        </button>
-        <span className="text-lg font-bold text-white">Slak</span>
+          <Menu />
+        </Button>
+        <span className="font-semibold">Slak</span>
       </header>
-
-      {open && (
-        <div
-          className="fixed inset-0 z-30 bg-black/50 md:hidden"
-          onClick={() => setOpen(false)}
-        />
-      )}
-
-      <div
-        className={`fixed inset-y-0 left-0 z-40 transition-transform duration-200 md:static md:z-auto md:translate-x-0 ${
-          open ? "translate-x-0" : "-translate-x-full"
-        }`}
-      >
-        <Sidebar currentUser={currentUser} onNavigate={() => setOpen(false)} />
+      <div className="hidden md:block">
+        <Sidebar currentUser={currentUser} />
       </div>
-
+      <Sheet open={open} onOpenChange={setOpen}>
+        <SheetContent
+          side="left"
+          className="w-72 gap-0 p-0"
+          showCloseButton={false}
+        >
+          <SheetTitle className="sr-only">Navegación</SheetTitle>
+          <SheetDescription className="sr-only">
+            Canales, personas, agentes y máquinas
+          </SheetDescription>
+          <Sidebar
+            currentUser={currentUser}
+            onNavigate={() => setOpen(false)}
+          />
+        </SheetContent>
+      </Sheet>
       <main className="flex min-h-0 min-w-0 flex-1 flex-col">{children}</main>
     </div>
   );

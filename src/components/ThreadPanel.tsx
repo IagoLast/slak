@@ -1,4 +1,5 @@
 "use client";
+import { Button } from "@/components/ui/button";
 
 import { useCallback } from "react";
 import { FiX } from "react-icons/fi";
@@ -20,11 +21,10 @@ export default function ThreadPanel({
   currentUser: SessionUser;
   onClose: () => void;
 }) {
-  const { data, mutate } = useSWR<{ root: ChatMessage; replies: ChatMessage[] }>(
-    `/api/messages/${rootId}/thread`,
-    fetcher,
-    { refreshInterval: 2500 },
-  );
+  const { data, mutate } = useSWR<{
+    root: ChatMessage & { channelId: string };
+    replies: ChatMessage[];
+  }>(`/api/messages/${rootId}/thread`, fetcher, { refreshInterval: 2500 });
 
   const sendReply = useCallback(
     async (payload: MessagePayload) => {
@@ -66,25 +66,32 @@ export default function ThreadPanel({
   );
 
   return (
-    <div className="fixed inset-0 z-40 flex flex-col bg-white md:static md:z-auto md:w-96 md:shrink-0 md:border-l md:border-gray-200">
-      <header className="flex items-center justify-between border-b border-gray-200 px-4 py-3">
-        <h2 className="text-base font-bold text-gray-900">Hilo</h2>
-        <button
+    <div className="fixed inset-0 z-40 flex flex-col bg-background md:static md:z-auto md:w-96 md:shrink-0 md:border-l md:border-border">
+      <header className="flex items-center justify-between border-b border-border px-4 py-3">
+        <h2 className="text-base font-bold text-foreground">Hilo</h2>
+        <Button
+          variant="ghost"
           onClick={onClose}
           title="Cerrar hilo"
-          className="rounded p-1.5 text-gray-400 hover:bg-gray-100 hover:text-gray-600"
+          className="rounded p-1.5 text-muted-foreground hover:bg-muted hover:text-muted-foreground"
         >
           <FiX size={16} />
-        </button>
+        </Button>
       </header>
 
       <div className="flex-1 overflow-y-auto px-3 py-3">
         {!data ? (
-          <p className="mt-6 text-center text-sm text-gray-400">Cargando…</p>
+          <p className="mt-6 text-center text-sm text-muted-foreground">
+            Cargando…
+          </p>
         ) : (
           <>
-            <MessageItem message={data.root} isOwn={data.root.user.id === currentUser.id} showHeader />
-            <div className="my-3 flex items-center gap-2 text-xs text-gray-400">
+            <MessageItem
+              message={data.root}
+              isOwn={data.root.user.id === currentUser.id}
+              showHeader
+            />
+            <div className="my-3 flex items-center gap-2 text-xs text-muted-foreground">
               <span className="h-px flex-1 bg-gray-200" />
               {data.replies.length === 0
                 ? "Sin respuestas todavía"
@@ -111,7 +118,12 @@ export default function ThreadPanel({
         )}
       </div>
 
-      <Composer placeholder="Responder en el hilo" compact onSend={sendReply} />
+      <Composer
+        placeholder="Responder en el hilo"
+        compact
+        channelId={data?.root.channelId}
+        onSend={sendReply}
+      />
     </div>
   );
 }

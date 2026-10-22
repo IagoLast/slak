@@ -1,4 +1,5 @@
 "use client";
+import { Button } from "@/components/ui/button";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
@@ -50,9 +51,8 @@ export default function Huddle({
   const [camOn, setCamOn] = useState(false);
   const [sharing, setSharing] = useState(false);
   const [participants, setParticipants] = useState<Participant[]>([]);
-  const [localVideoTrack, setLocalVideoTrack] = useState<MediaStreamTrack | null>(
-    null,
-  );
+  const [localVideoTrack, setLocalVideoTrack] =
+    useState<MediaStreamTrack | null>(null);
   const [remoteStreams, setRemoteStreams] = useState<Map<string, MediaStream>>(
     new Map(),
   );
@@ -142,7 +142,10 @@ export default function Huddle({
         setTrackVersion((v) => v + 1);
       };
       pc.onconnectionstatechange = () => {
-        if (pc.connectionState === "failed" || pc.connectionState === "closed") {
+        if (
+          pc.connectionState === "failed" ||
+          pc.connectionState === "closed"
+        ) {
           closePeer(peerId);
         }
       };
@@ -254,9 +257,9 @@ export default function Huddle({
       outboxRef.current = [];
       setLocalVideoTrack(null);
       setRemoteStreams(new Map());
-      fetch(`/api/channels/${channelId}/huddle/leave`, { method: "POST" }).catch(
-        () => {},
-      );
+      fetch(`/api/channels/${channelId}/huddle/leave`, {
+        method: "POST",
+      }).catch(() => {});
     };
   }, [joined, channelId, userId, ensurePeer, closePeer, handleSignal]);
 
@@ -374,19 +377,22 @@ export default function Huddle({
   if (!joined) {
     return (
       <div className="flex items-center gap-2">
-        {error && <span className="hidden text-xs text-red-600 sm:inline">{error}</span>}
-        <button
+        {error && (
+          <span className="hidden text-xs text-red-600 sm:inline">{error}</span>
+        )}
+        <Button
+          variant="ghost"
           onClick={join}
           title={idleCount > 0 ? "Unirse al huddle" : "Iniciar un huddle"}
           className={`flex items-center gap-1.5 rounded-lg border px-2.5 py-1 text-xs font-medium ${
             idleCount > 0
               ? "border-green-600 bg-green-600 text-white hover:bg-green-700"
-              : "border-gray-300 text-gray-600 hover:bg-gray-50"
+              : "border-input text-muted-foreground hover:bg-muted/50"
           }`}
         >
           <FiHeadphones size={13} />
           {idleCount > 0 ? `Unirse · ${idleCount}` : "Huddle"}
-        </button>
+        </Button>
       </div>
     );
   }
@@ -470,12 +476,16 @@ function HuddlePanel({
           <FiHeadphones size={14} className="shrink-0 text-green-400" />
           <span className="truncate">{channelName}</span>
         </p>
-        <span className="text-xs text-gray-400">{participants.length} dentro</span>
+        <span className="text-xs text-muted-foreground">
+          {participants.length} dentro
+        </span>
       </div>
 
       {error && <p className="mb-2 text-xs text-red-400">{error}</p>}
 
-      <div className={`mb-3 grid gap-2 ${anyVideo ? "grid-cols-2" : "grid-cols-4"}`}>
+      <div
+        className={`mb-3 grid gap-2 ${anyVideo ? "grid-cols-2" : "grid-cols-4"}`}
+      >
         {localStream ? (
           <VideoTile stream={localStream} label="Tú" mirrored={camOn} />
         ) : (
@@ -523,13 +533,14 @@ function HuddlePanel({
             <FiMonitor size={16} />
           </ControlButton>
         )}
-        <button
+        <Button
+          variant="ghost"
           onClick={onLeave}
           title="Salir del huddle"
           className="ml-2 rounded-full bg-red-600 p-2.5 hover:bg-red-700"
         >
           <FiPhoneOff size={16} />
-        </button>
+        </Button>
       </div>
     </div>
   );
@@ -547,15 +558,18 @@ function ControlButton({
   children: React.ReactNode;
 }) {
   return (
-    <button
+    <Button
+      variant="ghost"
       onClick={onClick}
       title={title}
       className={`rounded-full p-2.5 ${
-        active ? "bg-gray-600 hover:bg-gray-500" : "bg-gray-800 hover:bg-gray-700"
+        active
+          ? "bg-gray-600 hover:bg-muted/500"
+          : "bg-gray-800 hover:bg-gray-700"
       }`}
     >
       {children}
-    </button>
+    </Button>
   );
 }
 
@@ -598,7 +612,9 @@ function AvatarTile({ name, compact }: { name: string; compact: boolean }) {
       <span className="flex h-9 w-9 items-center justify-center rounded-full bg-violet-600 text-sm font-bold">
         {name.slice(0, 1).toUpperCase()}
       </span>
-      <span className="max-w-full truncate px-1 text-[10px] text-gray-300">{name}</span>
+      <span className="max-w-full truncate px-1 text-[10px] text-gray-300">
+        {name}
+      </span>
     </div>
   );
 }

@@ -1,5 +1,7 @@
+import { sql } from "drizzle-orm";
 import {
   index,
+  uniqueIndex,
   jsonb,
   pgTable,
   primaryKey,
@@ -11,6 +13,9 @@ export const users = pgTable("users", {
   id: text("id").primaryKey(),
   email: text("email").notNull().unique(),
   name: text("name").notNull(),
+  kind: text("kind", { enum: ["human", "agent"] })
+    .notNull()
+    .default("human"),
   passwordHash: text("password_hash").notNull(),
   role: text("role", { enum: ["admin", "member", "guest"] })
     .notNull()
@@ -56,30 +61,33 @@ export const channelMembers = pgTable(
   ],
 );
 
-export const messages = pgTable("messages", {
-  id: text("id").primaryKey(),
-  channelId: text("channel_id")
-    .notNull()
-    .references(() => channels.id, { onDelete: "cascade" }),
-  userId: text("user_id")
-    .notNull()
-    .references(() => users.id, { onDelete: "cascade" }),
-  // Si apunta a otro mensaje, este mensaje es una respuesta de su hilo.
-  parentId: text("parent_id"),
-  content: text("content"),
-  attachmentUrl: text("attachment_url"),
-  attachmentName: text("attachment_name"),
-  attachmentType: text("attachment_type", {
-    enum: ["file", "image", "audio"],
-  }),
-  createdAt: timestamp("created_at", { withTimezone: true })
-    .notNull()
-    .defaultNow(),
-},
-(t) => [
-  index("messages_channel_created_idx").on(t.channelId, t.createdAt),
-  index("messages_parent_idx").on(t.parentId),
-]);
+export const messages = pgTable(
+  "messages",
+  {
+    id: text("id").primaryKey(),
+    channelId: text("channel_id")
+      .notNull()
+      .references(() => channels.id, { onDelete: "cascade" }),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    // Si apunta a otro mensaje, este mensaje es una respuesta de su hilo.
+    parentId: text("parent_id"),
+    content: text("content"),
+    attachmentUrl: text("attachment_url"),
+    attachmentName: text("attachment_name"),
+    attachmentType: text("attachment_type", {
+      enum: ["file", "image", "audio"],
+    }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    index("messages_channel_created_idx").on(t.channelId, t.createdAt),
+    index("messages_parent_idx").on(t.parentId),
+  ],
+);
 
 export const invites = pgTable("invites", {
   token: text("token").primaryKey(),
@@ -135,3 +143,130 @@ export type User = typeof users.$inferSelect;
 export type Channel = typeof channels.$inferSelect;
 export type Message = typeof messages.$inferSelect;
 export type Invite = typeof invites.$inferSelect;
+
+export const agents = pgTable(
+  "agents",
+  {
+    id: text("id")
+      .primaryKey()
+      .references(() => users.id, { onDelete: "cascade" }),
+    handle: text("handle").notNull().unique(),
+    description: text("description").notNull().default(""),
+    machine: text("machine").notNull().default(""),
+    machineId: text("machine_id").references(() => machines.id),
+    worktree: text("worktree").notNull().default(""),
+    repository: text("repository").notNull().default(""),
+    provider: text("provider", { enum: ["codex", "claude"] })
+      .notNull()
+      .default("codex"),
+    runtimeHandle: text("runtime_handle"),
+    state: text("state", {
+      enum: ["external", "starting", "ready", "stopping", "stopped", "error"],
+    })
+      .notNull()
+      .default("external"),
+    error: text("error"),
+    tokenHash: text("token_hash").unique(),
+    createdBy: text("created_by")
+      .notNull()
+      .references(() => users.id),
+    lastSeenAt: timestamp("last_seen_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("agent_machine_worktree")
+      .on(t.machineId, t.worktree)
+      .where(sql`${t.worktree} <> '' AND ${t.machineId} IS NOT NULL`),
+  ],
+);
+
+export const agentTasks = pgTable(
+  "agent_tasks",
+  {
+    id: text("id").primaryKey(),
+    agentId: text("agent_id")
+      .notNull()
+      .references(() => agents.id, { onDelete: "cascade" }),
+    channelId: text("channel_id")
+      .notNull()
+      .references(() => channels.id, { onDelete: "cascade" }),
+    messageId: text("message_id")
+      .notNull()
+      .references(() => messages.id, { onDelete: "cascade" }),
+    createdBy: text("created_by")
+      .notNull()
+      .references(() => users.id),
+    kind: text("kind", { enum: ["task", "message"] })
+      .notNull()
+      .default("task"),
+    prompt: text("prompt").notNull(),
+    status: text("status", {
+      enum: ["queued", "running", "completed", "failed"],
+    })
+      .notNull()
+      .default("queued"),
+    result: text("result"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    index("agent_tasks_inbox_idx").on(t.agentId, t.status, t.createdAt),
+    uniqueIndex("agent_one_running_task")
+      .on(t.agentId)
+      .where(sql`${t.status} = 'running'`),
+  ],
+);
+
+export type Agent = typeof agents.$inferSelect;
+
+export const machines = pgTable("machines", {
+  id: text("id").primaryKey(),
+  name: text("name").notNull(),
+  ownerId: text("owner_id")
+    .notNull()
+    .references(() => users.id),
+  tokenHash: text("token_hash").unique(),
+  repositories: jsonb("repositories")
+    .$type<{ id: string; name: string }[]>()
+    .notNull()
+    .default([]),
+  sessions: jsonb("sessions")
+    .$type<
+      {
+        worktree: string;
+        name: string;
+        repository: string;
+        provider: "codex" | "claude";
+        runtimeHandle: string;
+      }[]
+    >()
+    .notNull()
+    .default([]),
+  lastSeenAt: timestamp("last_seen_at", { withTimezone: true }),
+  createdAt: timestamp("created_at", { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+});
+
+export const machineCommands = pgTable("machine_commands", {
+  id: text("id").primaryKey(),
+  machineId: text("machine_id")
+    .notNull()
+    .references(() => machines.id, { onDelete: "cascade" }),
+  agentId: text("agent_id")
+    .notNull()
+    .references(() => agents.id, { onDelete: "cascade" }),
+  action: text("action", { enum: ["create", "start", "stop"] }).notNull(),
+  status: text("status", { enum: ["queued", "running", "completed", "failed"] })
+    .notNull()
+    .default("queued"),
+  createdAt: timestamp("created_at", { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+});

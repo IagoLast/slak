@@ -74,6 +74,53 @@ const STATEMENTS = [
   )`,
   // Presencia online/offline.
   sql`ALTER TABLE "users" ADD COLUMN IF NOT EXISTS "last_seen_at" timestamptz NOT NULL DEFAULT now()`,
+  sql`ALTER TABLE "users" ADD COLUMN IF NOT EXISTS "kind" text NOT NULL DEFAULT 'human'`,
+  sql`CREATE TABLE IF NOT EXISTS "agents" (
+    "id" text PRIMARY KEY REFERENCES "users"("id") ON DELETE CASCADE,
+    "handle" text NOT NULL UNIQUE,
+    "description" text NOT NULL DEFAULT '',
+    "machine" text NOT NULL DEFAULT '',
+    "token_hash" text UNIQUE,
+    "created_by" text NOT NULL REFERENCES "users"("id"),
+    "last_seen_at" timestamptz,
+    "created_at" timestamptz NOT NULL DEFAULT now()
+  )`,
+  sql`CREATE TABLE IF NOT EXISTS "agent_tasks" (
+    "id" text PRIMARY KEY,
+    "agent_id" text NOT NULL REFERENCES "agents"("id") ON DELETE CASCADE,
+    "channel_id" text NOT NULL REFERENCES "channels"("id") ON DELETE CASCADE,
+    "message_id" text NOT NULL REFERENCES "messages"("id") ON DELETE CASCADE,
+    "created_by" text NOT NULL REFERENCES "users"("id"),
+    "kind" text NOT NULL DEFAULT 'task',
+    "prompt" text NOT NULL,
+    "status" text NOT NULL DEFAULT 'queued',
+    "result" text,
+    "created_at" timestamptz NOT NULL DEFAULT now(),
+    "updated_at" timestamptz NOT NULL DEFAULT now()
+  )`,
+  sql`CREATE INDEX IF NOT EXISTS "agent_tasks_inbox_idx" ON "agent_tasks" ("agent_id", "status", "created_at")`,
+  sql`CREATE TABLE IF NOT EXISTS "machines" (
+    "id" text PRIMARY KEY, "name" text NOT NULL,
+    "owner_id" text NOT NULL REFERENCES "users"("id"), "token_hash" text UNIQUE,
+    "repositories" jsonb NOT NULL DEFAULT '[]', "last_seen_at" timestamptz,
+    "created_at" timestamptz NOT NULL DEFAULT now()
+  )`,
+  sql`ALTER TABLE "agents" ADD COLUMN IF NOT EXISTS "machine_id" text REFERENCES "machines"("id")`,
+  sql`ALTER TABLE "agents" ADD COLUMN IF NOT EXISTS "worktree" text NOT NULL DEFAULT ''`,
+  sql`ALTER TABLE "agents" ADD COLUMN IF NOT EXISTS "repository" text NOT NULL DEFAULT ''`,
+  sql`ALTER TABLE "agents" ADD COLUMN IF NOT EXISTS "provider" text NOT NULL DEFAULT 'codex'`,
+  sql`ALTER TABLE "agents" ADD COLUMN IF NOT EXISTS "runtime_handle" text`,
+  sql`ALTER TABLE "agents" ADD COLUMN IF NOT EXISTS "state" text NOT NULL DEFAULT 'external'`,
+  sql`ALTER TABLE "agents" ADD COLUMN IF NOT EXISTS "error" text`,
+  sql`CREATE TABLE IF NOT EXISTS "machine_commands" (
+    "id" text PRIMARY KEY, "machine_id" text NOT NULL REFERENCES "machines"("id") ON DELETE CASCADE,
+    "agent_id" text NOT NULL REFERENCES "agents"("id") ON DELETE CASCADE,
+    "action" text NOT NULL, "status" text NOT NULL DEFAULT 'queued',
+    "created_at" timestamptz NOT NULL DEFAULT now()
+  )`,
+  sql`CREATE UNIQUE INDEX IF NOT EXISTS "agent_one_running_task" ON "agent_tasks" ("agent_id") WHERE "status" = 'running'`,
+  sql`ALTER TABLE "machines" ADD COLUMN IF NOT EXISTS "sessions" jsonb NOT NULL DEFAULT '[]'`,
+  sql`CREATE UNIQUE INDEX IF NOT EXISTS "agent_machine_worktree" ON "agents" ("machine_id", "worktree") WHERE "worktree" <> '' AND "machine_id" IS NOT NULL`,
 ];
 
 const SCHEMA_VERSION = STATEMENTS.length;

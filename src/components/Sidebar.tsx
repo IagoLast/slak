@@ -4,24 +4,69 @@ import { signOut } from "next-auth/react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
-import { createPortal } from "react-dom";
 import {
-  FiAtSign,
-  FiBell,
-  FiBellOff,
-  FiHash,
-  FiLock,
-  FiLogOut,
-  FiPlus,
-  FiUserPlus,
-  FiX,
-} from "react-icons/fi";
+  AtSign,
+  Bell,
+  Bot,
+  Hash,
+  ListTodo,
+  Lock,
+  LogOut,
+  MoreHorizontal,
+  Plus,
+  Server,
+  Trash2,
+  UserPlus,
+} from "lucide-react";
+import { toast } from "sonner";
 import useSWR from "swr";
-import { fetcher, Summary, SummaryChannel } from "@/lib/client";
-import { SessionUser } from "@/lib/session";
+import {
+  api,
+  fetcher,
+  Summary,
+  SummaryChannel,
+  AgentContact,
+} from "@/lib/client";
+import type { SessionUser } from "@/lib/session";
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Switch } from "@/components/ui/switch";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+} from "@/components/ui/dialog";
+import {
+  AlertDialog,
+  AlertDialogContent,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogCancel,
+  AlertDialogAction,
+} from "@/components/ui/alert-dialog";
+import {
+  ContextMenu,
+  ContextMenuTrigger,
+  ContextMenuContent,
+  ContextMenuItem,
+} from "@/components/ui/context-menu";
+import {
+  DropdownMenu,
+  DropdownMenuTrigger,
+  DropdownMenuContent,
+  DropdownMenuItem,
+} from "@/components/ui/dropdown-menu";
+import { Skeleton } from "@/components/ui/skeleton";
+import { cn } from "@/lib/utils";
 
 const NOTIF_PREF_KEY = "slak:notifications";
-
 function notificationsEnabled() {
   return (
     typeof window === "undefined" ||
@@ -36,41 +81,42 @@ export default function Sidebar({
   currentUser: SessionUser;
   onNavigate?: () => void;
 }) {
-  const router = useRouter();
-  const pathname = usePathname();
+  const router = useRouter(),
+    pathname = usePathname();
   const activeChannelId = pathname.startsWith("/c/") ? pathname.slice(3) : null;
-
-  const { data, mutate } = useSWR<Summary>("/api/me/summary", fetcher, {
+  const { data, error, mutate } = useSWR<Summary>("/api/me/summary", fetcher, {
     refreshInterval: 5000,
-    // Seguir latiendo con la pestaña en segundo plano para mantener la presencia.
     refreshWhenHidden: true,
   });
-
-  const [showNewChannel, setShowNewChannel] = useState(false);
-  const [showDmPicker, setShowDmPicker] = useState(false);
-  const [showNotifSettings, setShowNotifSettings] = useState(false);
-
-  // Notificaciones del navegador cuando suben los no-leídos de otros canales.
+  const { data: agentData } = useSWR<{ agents: AgentContact[] }>(
+    "/api/agents",
+    fetcher,
+    { refreshInterval: 5000 },
+  );
+  const [modal, setModal] = useState<"channel" | "dm" | "notifications" | null>(
+    null,
+  );
+  const [deleting, setDeleting] = useState<SummaryChannel | null>(null);
+  const [busy, setBusy] = useState(false);
   const prevUnread = useRef<Map<string, number>>(new Map());
   useEffect(() => {
     if (!data) return;
-    const prev = prevUnread.current;
     if (
-      prev.size > 0 &&
+      prevUnread.current.size &&
       typeof Notification !== "undefined" &&
       Notification.permission === "granted" &&
       notificationsEnabled()
     ) {
-      for (const channel of data.channels) {
-        const before = prev.get(channel.id) ?? 0;
-        const isActiveAndVisible =
-          channel.id === activeChannelId && document.visibilityState === "visible";
-        if (channel.unread > before && !isActiveAndVisible) {
-          const title = channel.type === "dm" ? channel.name : `#${channel.name}`;
-          const last = channel.lastMessage;
-          new Notification(title, {
-            body: last ? `${last.author}: ${last.preview}` : "Tienes mensajes nuevos",
-            tag: channel.id,
+      for (const c of data.channels) {
+        if (
+          c.unread > (prevUnread.current.get(c.id) ?? 0) &&
+          !(c.id === activeChannelId && document.visibilityState === "visible")
+        ) {
+          new Notification(c.type === "dm" ? c.name : `#${c.name}`, {
+            body: c.lastMessage
+              ? `${c.lastMessage.author}: ${c.lastMessage.preview}`
+              : "Tienes mensajes nuevos",
+            tag: c.id,
           });
         }
       }
@@ -79,263 +125,325 @@ export default function Sidebar({
   }, [data, activeChannelId]);
 
   async function openDm(userId: string) {
-    setShowDmPicker(false);
-    onNavigate?.();
-    const res = await fetch("/api/dms", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ userId }),
-    });
-    if (res.ok) {
-      const { channelId } = await res.json();
-      mutate();
+    try {
+      const { channelId } = await api<{ channelId: string }>(
+        "/api/dms",
+        "POST",
+        { userId },
+      );
+      setModal(null);
+      onNavigate?.();
+      await mutate();
       router.push(`/c/${channelId}`);
+    } catch (e) {
+      toast.error((e as Error).message);
     }
   }
-
+  async function deleteChannel() {
+    if (!deleting || busy) return;
+    setBusy(true);
+    try {
+      await api(`/api/channels/${deleting.id}`, "DELETE");
+      const remaining =
+        data?.channels.filter((c) => c.id !== deleting.id) ?? [];
+      await mutate(data ? { ...data, channels: remaining } : undefined, {
+        revalidate: false,
+      });
+      if (activeChannelId === deleting.id)
+        router.replace(remaining[0] ? `/c/${remaining[0].id}` : "/");
+      setDeleting(null);
+      toast.success("Canal eliminado");
+      void mutate();
+    } catch (e) {
+      toast.error((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+  const humanIds = new Set(
+    data?.users.filter((u) => u.kind !== "agent").map((u) => u.id),
+  );
   const channels = data?.channels.filter((c) => c.type !== "dm") ?? [];
-  const dms = data?.channels.filter((c) => c.type === "dm") ?? [];
-  const otherUsers = data?.users.filter((u) => u.id !== currentUser.id) ?? [];
-  const onlineById = new Map((data?.users ?? []).map((u) => [u.id, u.online]));
-
+  const dms =
+    data?.channels.filter(
+      (c) => c.type === "dm" && c.dmUserId && humanIds.has(c.dmUserId),
+    ) ?? [];
+  const online = new Map(data?.users.map((u) => [u.id, u.online]));
   return (
-    <aside className="flex h-full w-72 shrink-0 flex-col bg-violet-950 text-violet-100 md:w-64">
-      <div className="flex items-center justify-between border-b border-violet-900 px-4 py-3">
-        <span className="text-lg font-bold text-white">Slak</span>
-        <button
-          onClick={() => setShowNotifSettings(true)}
-          title="Ajustes de notificaciones"
-          className="rounded p-1.5 text-violet-300 hover:bg-violet-900 hover:text-white"
+    <aside className="flex h-full w-72 shrink-0 flex-col border-r bg-sidebar text-sidebar-foreground">
+      <div className="flex h-16 items-center gap-3 border-b px-4">
+        <div className="flex size-9 items-center justify-center rounded-xl bg-primary text-lg font-bold text-primary-foreground">
+          s
+        </div>
+        <div className="flex-1">
+          <p className="font-semibold tracking-tight">Slak</p>
+          <p className="text-xs text-muted-foreground">Tu equipo, conectado</p>
+        </div>
+        <Button
+          variant="ghost"
+          size="icon"
+          aria-label="Ajustes de notificaciones"
+          onClick={() => setModal("notifications")}
         >
-          <FiBell size={16} />
-        </button>
+          <Bell />
+        </Button>
       </div>
-
-      <nav className="flex-1 overflow-y-auto px-2 py-3">
-        <SectionHeader
-          label="Canales"
-          onAdd={currentUser.role !== "guest" ? () => setShowNewChannel(true) : undefined}
-        />
-        <ul>
-          {channels.map((channel) => (
-            <ChannelLink
-              key={channel.id}
-              channel={channel}
-              active={channel.id === activeChannelId}
-              onNavigate={onNavigate}
-            />
-          ))}
-        </ul>
-
-        <div className="mt-5" />
-        <SectionHeader label="Mensajes directos" onAdd={() => setShowDmPicker(true)} />
-        <ul>
-          {dms.map((channel) => (
-            <ChannelLink
-              key={channel.id}
-              channel={channel}
-              active={channel.id === activeChannelId}
-              online={channel.dmUserId ? onlineById.get(channel.dmUserId) : undefined}
-              onNavigate={onNavigate}
-            />
-          ))}
-        </ul>
-
+      <nav
+        className="flex-1 space-y-5 overflow-y-auto p-3"
+        aria-label="Navegación principal"
+      >
+        <div className="space-y-1">
+          <NavLink
+            href="/agents"
+            active={pathname === "/agents"}
+            onClick={onNavigate}
+          >
+            <Bot /> Agentes del equipo
+          </NavLink>
+          <NavLink
+            href="/machines"
+            active={pathname === "/machines"}
+            onClick={onNavigate}
+          >
+            <Server /> Máquinas compartidas
+          </NavLink>
+          <NavLink
+            href="/tasks"
+            active={pathname === "/tasks"}
+            onClick={onNavigate}
+          >
+            <ListTodo /> Tareas
+          </NavLink>
+        </div>
+        <div>
+          <SectionHeader
+            label="Canales"
+            onAdd={
+              currentUser.role !== "guest"
+                ? () => setModal("channel")
+                : undefined
+            }
+          />
+          {error && (
+            <p role="alert" className="p-2 text-xs text-destructive">
+              No se pudieron cargar los canales.
+            </p>
+          )}
+          {!data && !error && (
+            <div className="space-y-2 p-2">
+              <Skeleton className="h-7" />
+              <Skeleton className="h-7" />
+            </div>
+          )}
+          <ul className="space-y-0.5">
+            {channels.map((channel) => (
+              <ChannelLink
+                key={channel.id}
+                channel={channel}
+                active={channel.id === activeChannelId}
+                onNavigate={onNavigate}
+                onDelete={() => setDeleting(channel)}
+              />
+            ))}
+          </ul>
+          {data && !channels.length && (
+            <p className="p-2 text-xs text-muted-foreground">
+              Crea tu primer canal.
+            </p>
+          )}
+        </div>
+        <div>
+          <SectionHeader label="Agentes" />
+          <ul className="space-y-0.5">
+            {agentData?.agents.map((agent) => (
+              <li key={agent.id}>
+                <Button
+                  variant="ghost"
+                  className="w-full justify-start font-normal"
+                  onClick={() => openDm(agent.id)}
+                >
+                  <Bot className="text-muted-foreground" />
+                  <span className="flex-1 truncate text-left">
+                    {agent.name}
+                  </span>
+                  <PresenceDot online={agent.online} />
+                </Button>
+              </li>
+            ))}
+          </ul>
+          {!agentData?.agents.length && (
+            <p className="px-2 py-1 text-xs text-muted-foreground">
+              Comparte una sesión de Orca.
+            </p>
+          )}
+        </div>
+        <div>
+          <SectionHeader
+            label="Mensajes directos"
+            onAdd={() => setModal("dm")}
+          />
+          <ul className="space-y-0.5">
+            {dms.map((channel) => (
+              <ChannelLink
+                key={channel.id}
+                channel={channel}
+                active={channel.id === activeChannelId}
+                online={online.get(channel.dmUserId!)}
+                onNavigate={onNavigate}
+              />
+            ))}
+          </ul>
+        </div>
         {currentUser.role === "admin" && (
-          <div className="mt-6 border-t border-violet-900 pt-3">
-            <Link
-              href="/invites"
-              onClick={onNavigate}
-              className={`flex items-center gap-2 rounded px-2 py-1.5 text-sm hover:bg-violet-900 ${
-                pathname === "/invites" ? "bg-violet-800 text-white" : "text-violet-300"
-              }`}
-            >
-              <FiUserPlus size={15} />
-              Invitar personas
-            </Link>
-          </div>
+          <NavLink
+            href="/invites"
+            active={pathname === "/invites"}
+            onClick={onNavigate}
+          >
+            <UserPlus /> Invitar personas
+          </NavLink>
         )}
       </nav>
-
-      <div className="flex items-center gap-2 border-t border-violet-900 px-4 py-3">
-        <div className="flex h-8 w-8 items-center justify-center rounded-full bg-violet-700 text-sm font-semibold text-white">
-          {currentUser.name.slice(0, 1).toUpperCase()}
-        </div>
+      <div className="flex items-center gap-3 border-t p-4">
+        <Avatar>
+          <AvatarFallback>
+            {currentUser.name.slice(0, 1).toUpperCase()}
+          </AvatarFallback>
+        </Avatar>
         <div className="min-w-0 flex-1">
-          <p className="truncate text-sm font-medium text-white">{currentUser.name}</p>
-          <p className="truncate text-xs text-violet-400">
-            {currentUser.role === "guest" ? "Invitado externo" : currentUser.role}
+          <p className="truncate text-sm font-medium">{currentUser.name}</p>
+          <p className="text-xs text-muted-foreground">
+            {currentUser.role === "guest" ? "Invitado" : "Miembro del equipo"}
           </p>
         </div>
-        <button
+        <Button
+          variant="ghost"
+          size="icon"
+          aria-label="Cerrar sesión"
           onClick={() => signOut({ callbackUrl: "/login" })}
-          title="Cerrar sesión"
-          className="rounded p-1.5 text-violet-300 hover:bg-violet-900 hover:text-white"
         >
-          <FiLogOut size={16} />
-        </button>
+          <LogOut />
+        </Button>
       </div>
-
-      {showNewChannel && (
+      {modal === "channel" && (
         <NewChannelModal
-          onClose={() => setShowNewChannel(false)}
+          onClose={() => setModal(null)}
           onCreated={(id) => {
-            setShowNewChannel(false);
+            setModal(null);
             onNavigate?.();
-            mutate();
+            void mutate();
             router.push(`/c/${id}`);
           }}
         />
       )}
-
-      {showDmPicker && (
-        <Modal title="Nuevo mensaje directo" onClose={() => setShowDmPicker(false)}>
-          {otherUsers.length === 0 ? (
-            <p className="text-sm text-gray-500">No hay más personas todavía.</p>
-          ) : (
-            <ul className="max-h-72 divide-y divide-gray-100 overflow-y-auto">
-              {otherUsers.map((u) => (
-                <li key={u.id}>
-                  <button
-                    onClick={() => openDm(u.id)}
-                    className="flex w-full items-center gap-2 px-2 py-2 text-left text-sm text-gray-800 hover:bg-gray-50"
-                  >
-                    <span className="flex h-7 w-7 items-center justify-center rounded-full bg-violet-100 text-xs font-semibold text-violet-700">
-                      {u.name.slice(0, 1).toUpperCase()}
-                    </span>
-                    {u.name}
-                    <PresenceDot online={u.online} />
-                    {u.role === "guest" && (
-                      <span className="ml-auto text-xs text-gray-400">externo</span>
-                    )}
-                  </button>
-                </li>
+      <Dialog
+        open={modal === "dm"}
+        onOpenChange={(open) => !open && setModal(null)}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Nuevo mensaje directo</DialogTitle>
+            <DialogDescription>
+              Habla con una persona o un agente del equipo.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="max-h-80 space-y-1 overflow-y-auto">
+            {data?.users
+              .filter((u) => u.id !== currentUser.id)
+              .map((u) => (
+                <Button
+                  key={u.id}
+                  variant="ghost"
+                  className="w-full justify-start"
+                  onClick={() => openDm(u.id)}
+                >
+                  {u.kind === "agent" && <Bot />}
+                  {u.name}
+                  <PresenceDot online={u.online} />
+                </Button>
               ))}
-            </ul>
-          )}
-        </Modal>
+          </div>
+        </DialogContent>
+      </Dialog>
+      {modal === "notifications" && (
+        <NotificationSettings onClose={() => setModal(null)} />
       )}
-
-      {showNotifSettings && (
-        <NotificationSettingsModal onClose={() => setShowNotifSettings(false)} />
-      )}
+      <AlertDialog
+        open={!!deleting}
+        onOpenChange={(open) => !open && !busy && setDeleting(null)}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>¿Borrar #{deleting?.name}?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Se eliminarán el canal, sus mensajes, hilos y tareas. Esta acción
+              no se puede deshacer.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={busy}>Cancelar</AlertDialogCancel>
+            <AlertDialogAction
+              variant="destructive"
+              disabled={busy}
+              onClick={(event) => {
+                event.preventDefault();
+                void deleteChannel();
+              }}
+            >
+              {busy ? "Borrando…" : "Borrar canal"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </aside>
   );
 }
-
-function NotificationSettingsModal({ onClose }: { onClose: () => void }) {
-  const [permission, setPermission] = useState<NotificationPermission | "unsupported">(
-    () => (typeof Notification === "undefined" ? "unsupported" : Notification.permission),
-  );
-  const [enabled, setEnabled] = useState(notificationsEnabled);
-
-  async function requestPermission() {
-    if (typeof Notification === "undefined") return;
-    setPermission(await Notification.requestPermission());
-  }
-
-  function toggleEnabled() {
-    const next = !enabled;
-    setEnabled(next);
-    window.localStorage.setItem(NOTIF_PREF_KEY, next ? "on" : "off");
-  }
-
-  function sendTest() {
-    new Notification("Slak", { body: "Así se verán las notificaciones 🎉" });
-  }
-
-  const ready = permission === "granted" && enabled;
-
+function NavLink({
+  href,
+  active,
+  onClick,
+  children,
+}: {
+  href: string;
+  active: boolean;
+  onClick?: () => void;
+  children: React.ReactNode;
+}) {
   return (
-    <Modal title="Notificaciones" onClose={onClose}>
-      <div className="space-y-4">
-        {permission === "unsupported" && (
-          <p className="text-sm text-gray-500">
-            Este navegador no soporta notificaciones.
-          </p>
-        )}
-
-        {permission === "default" && (
-          <div className="rounded-lg bg-amber-50 p-3 text-sm text-amber-900">
-            <p className="mb-2">
-              El navegador aún no tiene permiso para mostrar notificaciones.
-            </p>
-            <button
-              onClick={requestPermission}
-              className="rounded-lg bg-violet-700 px-3 py-1.5 text-sm font-semibold text-white hover:bg-violet-800"
-            >
-              Conceder permiso
-            </button>
-          </div>
-        )}
-
-        {permission === "denied" && (
-          <p className="rounded-lg bg-red-50 p-3 text-sm text-red-800">
-            Las notificaciones están bloqueadas. Actívalas en los ajustes del
-            navegador (icono del candado junto a la dirección) y recarga la página.
-          </p>
-        )}
-
-        {permission !== "unsupported" && (
-          <label className="flex cursor-pointer items-center justify-between gap-3">
-            <span className="text-sm text-gray-800">
-              Avisarme de mensajes nuevos en otros canales
-            </span>
-            <button
-              role="switch"
-              aria-checked={enabled}
-              onClick={toggleEnabled}
-              className={`relative h-6 w-11 shrink-0 rounded-full transition-colors ${
-                enabled ? "bg-violet-600" : "bg-gray-300"
-              }`}
-            >
-              <span
-                className={`absolute top-0.5 left-0 h-5 w-5 rounded-full bg-white shadow transition-transform ${
-                  enabled ? "translate-x-[22px]" : "translate-x-0.5"
-                }`}
-              />
-            </button>
-          </label>
-        )}
-
-        {ready ? (
-          <button
-            onClick={sendTest}
-            className="flex w-full items-center justify-center gap-2 rounded-lg border border-gray-300 py-2 text-sm text-gray-700 hover:bg-gray-50"
-          >
-            <FiBell size={14} /> Enviar notificación de prueba
-          </button>
-        ) : (
-          permission !== "unsupported" && (
-            <p className="flex items-center gap-2 text-xs text-gray-400">
-              <FiBellOff size={13} /> Ahora mismo no recibirás notificaciones.
-            </p>
-          )
-        )}
-      </div>
-    </Modal>
+    <Button
+      asChild
+      variant={active ? "secondary" : "ghost"}
+      className="w-full justify-start"
+    >
+      <Link href={href} onClick={onClick}>
+        {children}
+      </Link>
+    </Button>
   );
 }
-
-function SectionHeader({ label, onAdd }: { label: string; onAdd?: () => void }) {
+function SectionHeader({
+  label,
+  onAdd,
+}: {
+  label: string;
+  onAdd?: () => void;
+}) {
   return (
-    <div className="mb-1 flex items-center justify-between px-2">
-      <span className="text-xs font-semibold tracking-wide text-violet-400 uppercase">
-        {label}
-      </span>
+    <div className="mb-1 flex h-7 items-center justify-between px-2">
+      <span className="text-xs font-medium text-muted-foreground">{label}</span>
       {onAdd && (
-        <button
+        <Button
+          variant="ghost"
+          size="icon-xs"
+          aria-label={`Añadir ${label.toLowerCase()}`}
           onClick={onAdd}
-          title={`Añadir ${label.toLowerCase()}`}
-          className="rounded p-1 text-violet-300 hover:bg-violet-900 hover:text-white"
         >
-          <FiPlus size={14} />
-        </button>
+          <Plus />
+        </Button>
       )}
     </div>
   );
 }
-
 export function ChannelIcon({
   type,
   size = 14,
@@ -343,99 +451,97 @@ export function ChannelIcon({
   type: "public" | "private" | "dm";
   size?: number;
 }) {
-  if (type === "public") return <FiHash size={size} />;
-  if (type === "private") return <FiLock size={size} />;
-  return <FiAtSign size={size} />;
+  const Icon = type === "public" ? Hash : type === "private" ? Lock : AtSign;
+  return <Icon size={size} />;
 }
-
 export function PresenceDot({ online }: { online?: boolean }) {
   return (
     <span
+      role="img"
+      aria-label={online ? "En línea" : "Desconectado"}
       title={online ? "En línea" : "Desconectado"}
-      className={`inline-block h-2 w-2 shrink-0 rounded-full ${
-        online ? "bg-green-500" : "border border-gray-400 bg-transparent"
-      }`}
+      className={cn(
+        "inline-block size-2 shrink-0 rounded-full",
+        online ? "bg-emerald-500" : "border border-muted-foreground/60",
+      )}
     />
   );
 }
-
 function ChannelLink({
   channel,
   active,
   online,
   onNavigate,
+  onDelete,
 }: {
   channel: SummaryChannel;
   active: boolean;
   online?: boolean;
   onNavigate?: () => void;
+  onDelete?: () => void;
 }) {
   return (
-    <li>
-      <Link
-        href={`/c/${channel.id}`}
-        prefetch
-        onClick={onNavigate}
-        className={`flex items-center gap-2 rounded px-2 py-1.5 text-sm ${
-          active
-            ? "bg-violet-800 font-semibold text-white"
-            : channel.unread > 0
-              ? "font-semibold text-white hover:bg-violet-900"
-              : "text-violet-300 hover:bg-violet-900"
-        }`}
-      >
-        <span className="flex w-4 items-center justify-center text-violet-400">
-          {channel.type === "dm" ? (
-            <PresenceDot online={online} />
-          ) : (
-            <ChannelIcon type={channel.type} />
-          )}
-        </span>
-        <span className="min-w-0 flex-1 truncate">{channel.name}</span>
-        {channel.unread > 0 && (
-          <span className="rounded-full bg-red-500 px-1.5 py-0.5 text-xs font-bold text-white">
-            {channel.unread > 99 ? "99+" : channel.unread}
-          </span>
+    <li className="group relative">
+      <ContextMenu>
+        <ContextMenuTrigger asChild>
+          <Link
+            href={`/c/${channel.id}`}
+            onClick={onNavigate}
+            aria-current={active ? "page" : undefined}
+            className={cn(
+              "flex min-h-8 items-center gap-2 rounded-lg px-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring",
+              active
+                ? "bg-primary/10 font-medium text-primary"
+                : "text-muted-foreground hover:bg-muted hover:text-foreground",
+              channel.unread > 0 && "font-semibold text-foreground",
+              channel.canDelete && "pr-8",
+            )}
+          >
+            <span className="flex w-4 justify-center">
+              {channel.type === "dm" ? (
+                <PresenceDot online={online} />
+              ) : (
+                <ChannelIcon type={channel.type} />
+              )}
+            </span>
+            <span className="min-w-0 flex-1 truncate">{channel.name}</span>
+            {channel.unread > 0 && (
+              <Badge className="h-5 px-1.5">
+                {channel.unread > 99 ? "99+" : channel.unread}
+              </Badge>
+            )}
+          </Link>
+        </ContextMenuTrigger>
+        {channel.canDelete && (
+          <ContextMenuContent>
+            <ContextMenuItem variant="destructive" onSelect={onDelete}>
+              <Trash2 /> Borrar canal
+            </ContextMenuItem>
+          </ContextMenuContent>
         )}
-      </Link>
+      </ContextMenu>
+      {channel.canDelete && (
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button
+              variant="ghost"
+              size="icon-xs"
+              aria-label={`Opciones de ${channel.name}`}
+              className="absolute top-1 right-1 opacity-0 group-hover:opacity-100 focus:opacity-100 max-md:opacity-100"
+            >
+              <MoreHorizontal />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent>
+            <DropdownMenuItem variant="destructive" onSelect={onDelete}>
+              <Trash2 /> Borrar canal
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      )}
     </li>
   );
 }
-
-function Modal({
-  title,
-  onClose,
-  children,
-}: {
-  title: string;
-  onClose: () => void;
-  children: React.ReactNode;
-}) {
-  // Portal al body: el drawer del sidebar usa transform, que convertiría
-  // este `fixed` en relativo a la columna del sidebar en vez de a la pantalla.
-  if (typeof document === "undefined") return null;
-  return createPortal(
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4"
-      onClick={onClose}
-    >
-      <div
-        className="max-h-[85dvh] w-full max-w-sm overflow-y-auto rounded-xl bg-white p-5 text-gray-900 shadow-xl"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="mb-3 flex items-center justify-between">
-          <h2 className="text-base font-semibold">{title}</h2>
-          <button onClick={onClose} className="p-1 text-gray-400 hover:text-gray-600">
-            <FiX size={16} />
-          </button>
-        </div>
-        {children}
-      </div>
-    </div>,
-    document.body,
-  );
-}
-
 function NewChannelModal({
   onClose,
   onCreated,
@@ -443,51 +549,134 @@ function NewChannelModal({
   onClose: () => void;
   onCreated: (id: string) => void;
 }) {
-  const [name, setName] = useState("");
-  const [isPrivate, setIsPrivate] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
+  const [name, setName] = useState(""),
+    [isPrivate, setIsPrivate] = useState(false),
+    [busy, setBusy] = useState(false),
+    [error, setError] = useState("");
   async function create(e: React.FormEvent) {
     e.preventDefault();
-    const res = await fetch("/api/channels", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name, isPrivate }),
-    });
-    const data = await res.json().catch(() => null);
-    if (!res.ok) {
-      setError(data?.error ?? "No se pudo crear el canal.");
-      return;
+    setBusy(true);
+    setError("");
+    try {
+      const result = await api<{ id: string }>("/api/channels", "POST", {
+        name,
+        isPrivate,
+      });
+      onCreated(result.id);
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(false);
     }
-    onCreated(data.id);
   }
-
   return (
-    <Modal title="Nuevo canal" onClose={onClose}>
-      <form onSubmit={create} className="space-y-3">
-        <input
-          autoFocus
-          placeholder="nombre-del-canal"
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-          className="w-full rounded-lg border border-gray-300 px-3 py-2 text-base outline-none sm:text-sm focus:border-violet-500"
-        />
-        <label className="flex items-center gap-2 text-sm text-gray-700">
-          <input
-            type="checkbox"
-            checked={isPrivate}
-            onChange={(e) => setIsPrivate(e.target.checked)}
-          />
-          Canal privado (solo miembros añadidos)
-        </label>
-        {error && <p className="text-sm text-red-600">{error}</p>}
-        <button
-          type="submit"
-          className="w-full rounded-lg bg-violet-700 py-2 text-sm font-semibold text-white hover:bg-violet-800"
-        >
-          Crear canal
-        </button>
-      </form>
-    </Modal>
+    <Dialog open onOpenChange={(open) => !open && onClose()}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Nuevo canal</DialogTitle>
+          <DialogDescription>
+            Un espacio para conversar con personas y agentes.
+          </DialogDescription>
+        </DialogHeader>
+        <form onSubmit={create} className="space-y-4">
+          <div className="space-y-2">
+            <Label htmlFor="channel-name">Nombre</Label>
+            <Input
+              id="channel-name"
+              autoFocus
+              required
+              maxLength={50}
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder="nombre-del-canal"
+            />
+          </div>
+          <div className="flex items-center justify-between">
+            <Label htmlFor="private-channel">Canal privado</Label>
+            <Switch
+              id="private-channel"
+              checked={isPrivate}
+              onCheckedChange={setIsPrivate}
+            />
+          </div>
+          {error && (
+            <p role="alert" className="text-sm text-destructive">
+              {error}
+            </p>
+          )}
+          <Button type="submit" disabled={busy} className="w-full">
+            {busy ? "Creando…" : "Crear canal"}
+          </Button>
+        </form>
+      </DialogContent>
+    </Dialog>
+  );
+}
+function NotificationSettings({ onClose }: { onClose: () => void }) {
+  const [permission, setPermission] = useState<
+    NotificationPermission | "unsupported"
+  >(() =>
+    typeof Notification === "undefined"
+      ? "unsupported"
+      : Notification.permission,
+  );
+  const [enabled, setEnabled] = useState(notificationsEnabled);
+  return (
+    <Dialog open onOpenChange={(open) => !open && onClose()}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Notificaciones</DialogTitle>
+          <DialogDescription>
+            Recibe avisos de mensajes nuevos en otros canales.
+          </DialogDescription>
+        </DialogHeader>
+        {permission === "unsupported" ? (
+          <p>Este navegador no soporta notificaciones.</p>
+        ) : (
+          <>
+            <div className="flex items-center justify-between gap-4">
+              <Label htmlFor="notifications-enabled">
+                Avisarme de nuevos mensajes
+              </Label>
+              <Switch
+                id="notifications-enabled"
+                checked={enabled}
+                onCheckedChange={(value) => {
+                  setEnabled(value);
+                  localStorage.setItem(NOTIF_PREF_KEY, value ? "on" : "off");
+                }}
+              />
+            </div>
+            {permission === "default" && (
+              <Button
+                onClick={async () =>
+                  setPermission(await Notification.requestPermission())
+                }
+              >
+                Conceder permiso
+              </Button>
+            )}
+            {permission === "denied" && (
+              <p className="text-sm text-muted-foreground">
+                Activa las notificaciones en los ajustes del navegador y recarga
+                la página.
+              </p>
+            )}
+            {permission === "granted" && enabled && (
+              <Button
+                variant="outline"
+                onClick={() =>
+                  new Notification("Slak", {
+                    body: "Así se verán tus notificaciones",
+                  })
+                }
+              >
+                Enviar notificación de prueba
+              </Button>
+            )}
+          </>
+        )}
+      </DialogContent>
+    </Dialog>
   );
 }

@@ -1,5 +1,9 @@
 "use client";
 
+import { Badge } from "@/components/ui/badge";
+import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import { Button } from "@/components/ui/button";
+import { Bot } from "lucide-react";
 import { FiMessageSquare, FiPaperclip } from "react-icons/fi";
 import MessageContent from "@/components/MessageContent";
 import { ChatMessage } from "@/lib/client";
@@ -31,24 +35,39 @@ export default function MessageItem({
 
   return (
     <div
-      className={`group relative flex gap-3 px-1 py-0.5 hover:bg-gray-50 ${showHeader ? "mt-3" : ""}`}
+      className={`group relative flex gap-3 px-1 py-0.5 hover:bg-muted/50 ${showHeader ? "mt-3" : ""}`}
     >
       <div className="w-9 shrink-0">
         {showHeader && (
-          <div
-            className={`flex h-9 w-9 items-center justify-center rounded-lg text-sm font-semibold text-white ${
-              isOwn ? "bg-violet-600" : "bg-gray-500"
-            }`}
-          >
-            {message.user.name.slice(0, 1).toUpperCase()}
-          </div>
+          <Avatar className="size-9 rounded-lg">
+            <AvatarFallback
+              className={
+                isOwn
+                  ? "rounded-lg bg-primary text-primary-foreground"
+                  : "rounded-lg"
+              }
+            >
+              {message.user.kind === "agent" ? (
+                <Bot className="size-5" />
+              ) : (
+                message.user.name.slice(0, 1).toUpperCase()
+              )}
+            </AvatarFallback>
+          </Avatar>
         )}
       </div>
       <div className="min-w-0 flex-1">
         {showHeader && (
           <p className="text-sm">
-            <span className="font-bold text-gray-900">{message.user.name}</span>{" "}
-            <span className="text-xs text-gray-400">
+            <span className="font-bold text-foreground">
+              {message.user.name}
+            </span>{" "}
+            {message.user.kind === "agent" && (
+              <Badge variant="secondary" className="mr-1 h-4 text-[10px]">
+                Agente
+              </Badge>
+            )}
+            <span className="text-xs text-muted-foreground">
               {isToday
                 ? timeFormat.format(created)
                 : `${dateFormat.format(created)} ${timeFormat.format(created)}`}
@@ -58,23 +77,25 @@ export default function MessageItem({
         {message.content && <MessageContent content={message.content} />}
         {message.attachmentUrl && <Attachment message={message} />}
         {onOpenThread && replyCount > 0 && (
-          <button
+          <Button
+            variant="ghost"
             onClick={() => onOpenThread(message.id)}
-            className="mt-0.5 flex items-center gap-1.5 text-xs font-medium text-violet-700 hover:underline"
+            className="mt-0.5 flex items-center gap-1.5 text-xs font-medium text-primary hover:underline"
           >
             <FiMessageSquare size={12} />
             {replyCount === 1 ? "1 respuesta" : `${replyCount} respuestas`}
-          </button>
+          </Button>
         )}
       </div>
       {onOpenThread && (
-        <button
+        <Button
+          variant="ghost"
           onClick={() => onOpenThread(message.id)}
           title="Responder en hilo"
-          className="absolute top-0 right-2 hidden rounded-lg border border-gray-200 bg-white p-1.5 text-gray-500 shadow-sm group-hover:block hover:text-violet-700 max-sm:block"
+          className="absolute top-0 right-2 hidden rounded-lg border border-border bg-background p-1.5 text-muted-foreground shadow-sm group-hover:block hover:text-primary max-sm:block"
         >
           <FiMessageSquare size={14} />
-        </button>
+        </Button>
       )}
     </div>
   );
@@ -86,15 +107,31 @@ function Attachment({ message }: { message: ChatMessage }) {
 
   if (message.attachmentType === "image") {
     return (
-      <a href={url} target="_blank" rel="noreferrer" className="mt-1 block max-w-sm">
+      <a
+        href={url}
+        target="_blank"
+        rel="noreferrer"
+        className="mt-1 block max-w-sm"
+      >
         {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img src={url} alt={name} className="max-h-72 rounded-lg border border-gray-200" />
+        <img
+          src={url}
+          alt={name}
+          className="max-h-72 rounded-lg border border-border"
+        />
       </a>
     );
   }
 
   if (message.attachmentType === "audio") {
-    return <audio controls src={url} className="mt-1 h-10 max-w-xs" preload="metadata" />;
+    return (
+      <audio
+        controls
+        src={url}
+        className="mt-1 h-10 max-w-xs"
+        preload="metadata"
+      />
+    );
   }
 
   return (
@@ -103,7 +140,7 @@ function Attachment({ message }: { message: ChatMessage }) {
       target="_blank"
       rel="noreferrer"
       download={name}
-      className="mt-1 inline-flex items-center gap-2 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-violet-700 hover:bg-gray-100"
+      className="mt-1 inline-flex items-center gap-2 rounded-lg border border-border bg-muted/50 px-3 py-2 text-sm text-primary hover:bg-muted"
     >
       <FiPaperclip size={14} className="shrink-0" />
       <span className="max-w-60 truncate">{name}</span>

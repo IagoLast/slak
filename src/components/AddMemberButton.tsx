@@ -1,89 +1,102 @@
 "use client";
-
 import { useState } from "react";
-import { FiPlus, FiUsers } from "react-icons/fi";
+import { Bot, Plus, Users } from "lucide-react";
+import { toast } from "sonner";
 import useSWR from "swr";
-import { fetcher, Summary } from "@/lib/client";
-
-/** Añadir personas a un canal (necesario para dar acceso a invitados externos). */
+import { api, fetcher, Summary } from "@/lib/client";
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+} from "@/components/ui/dialog";
 export default function AddMemberButton({ channelId }: { channelId: string }) {
-  const [open, setOpen] = useState(false);
-  const { data: summary } = useSWR<Summary>(open ? "/api/me/summary" : null, fetcher);
-  const { data: membersData, mutate } = useSWR<{
-    members: { id: string; name: string; role: string }[];
+  const [open, setOpen] = useState(false),
+    [busy, setBusy] = useState<string | null>(null);
+  const { data: summary } = useSWR<Summary>(
+    open ? "/api/me/summary" : null,
+    fetcher,
+  );
+  const { data, error, mutate } = useSWR<{
+    members: { id: string; name: string; role: string; kind: string }[];
   }>(open ? `/api/channels/${channelId}/members` : null, fetcher);
-
-  const memberIds = new Set(membersData?.members.map((m) => m.id) ?? []);
-  const candidates = summary?.users.filter((u) => !memberIds.has(u.id)) ?? [];
-
-  async function addMember(userId: string) {
-    await fetch(`/api/channels/${channelId}/members`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ userId }),
-    });
-    mutate();
+  const ids = new Set(data?.members.map((m) => m.id));
+  async function add(userId: string) {
+    setBusy(userId);
+    try {
+      await api(`/api/channels/${channelId}/members`, "POST", { userId });
+      await mutate();
+      toast.success("Miembro añadido");
+    } catch (e) {
+      toast.error((e as Error).message);
+    } finally {
+      setBusy(null);
+    }
   }
-
   return (
-    <div className="relative">
-      <button
-        onClick={() => setOpen((v) => !v)}
-        className="flex items-center gap-1.5 rounded-lg border border-gray-300 px-2.5 py-1 text-xs text-gray-600 hover:bg-gray-50"
-      >
-        <FiUsers size={13} /> Miembros
-      </button>
-      {open && (
-        <>
-          <div className="fixed inset-0 z-10" onClick={() => setOpen(false)} />
-          <div className="absolute right-0 z-20 mt-1 w-64 max-w-[calc(100vw-1.5rem)] rounded-xl border border-gray-200 bg-white p-3 shadow-lg">
-            <p className="mb-2 text-xs font-semibold text-gray-500 uppercase">
-              En este canal
+    <>
+      <Button variant="outline" size="sm" onClick={() => setOpen(true)}>
+        <Users /> Miembros
+      </Button>
+      <Dialog open={open} onOpenChange={setOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Miembros del canal</DialogTitle>
+            <DialogDescription>
+              Añade personas o agentes. Los agentes podrán leer este canal y
+              recibir menciones.
+            </DialogDescription>
+          </DialogHeader>
+          {error ? (
+            <p role="alert" className="text-destructive">
+              No se pudieron cargar los miembros.
             </p>
-            {!membersData ? (
-              <p className="mb-3 text-sm text-gray-400">Cargando…</p>
-            ) : (
-              <ul className="mb-3 max-h-40 space-y-1 overflow-y-auto">
-                {membersData.members.map((m) => (
-                  <li key={m.id} className="flex items-center gap-2 text-sm text-gray-800">
+          ) : !data ? (
+            <p>Cargando…</p>
+          ) : (
+            <>
+              <div className="max-h-48 space-y-2 overflow-auto">
+                {data.members.map((m) => (
+                  <div key={m.id} className="flex items-center gap-2 text-sm">
+                    {m.kind === "agent" && <Bot className="size-4" />}
                     {m.name}
-                    {m.role === "guest" && (
-                      <span className="text-xs text-gray-400">externo</span>
+                    {m.kind === "agent" ? (
+                      <Badge variant="secondary">Agente</Badge>
+                    ) : (
+                      m.role === "guest" && (
+                        <Badge variant="outline">Invitado</Badge>
+                      )
                     )}
-                  </li>
+                  </div>
                 ))}
-              </ul>
-            )}
-            {membersData && candidates.length > 0 && (
-              <>
-                <p className="mb-2 text-xs font-semibold text-gray-500 uppercase">
-                  Añadir
-                </p>
-                <ul className="max-h-40 space-y-1 overflow-y-auto">
-                  {candidates.map((u) => (
-                    <li key={u.id}>
-                      <button
-                        onClick={() => addMember(u.id)}
-                        className="flex w-full items-center justify-between rounded px-1 py-1 text-left text-sm text-gray-800 hover:bg-gray-50"
-                      >
-                        <span>
-                          {u.name}{" "}
-                          {u.role === "guest" && (
-                            <span className="text-xs text-gray-400">externo</span>
-                          )}
-                        </span>
-                        <span className="text-violet-700">
-                          <FiPlus size={14} />
-                        </span>
-                      </button>
-                    </li>
+              </div>
+              <p className="text-xs font-medium text-muted-foreground">
+                Añadir al canal
+              </p>
+              <div className="max-h-52 space-y-1 overflow-auto">
+                {summary?.users
+                  .filter((u) => !ids.has(u.id))
+                  .map((u) => (
+                    <Button
+                      key={u.id}
+                      variant="ghost"
+                      disabled={!!busy}
+                      onClick={() => add(u.id)}
+                      className="w-full justify-start"
+                    >
+                      {u.kind === "agent" && <Bot />}
+                      {u.name}
+                      <Plus className="ml-auto" />
+                    </Button>
                   ))}
-                </ul>
-              </>
-            )}
-          </div>
-        </>
-      )}
-    </div>
+              </div>
+            </>
+          )}
+        </DialogContent>
+      </Dialog>
+    </>
   );
 }

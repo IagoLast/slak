@@ -25,7 +25,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         const user = await db.query.users.findFirst({
           where: eq(users.email, email),
         });
-        if (!user) return null;
+        if (!user || user.kind === "agent") return null;
 
         const ok = await bcrypt.compare(password, user.passwordHash);
         if (!ok) return null;
