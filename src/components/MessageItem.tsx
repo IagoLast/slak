@@ -1,4 +1,5 @@
 "use client";
+import Link from "next/link";
 
 import { Badge } from "@/components/ui/badge";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
@@ -76,6 +77,14 @@ export default function MessageItem({
         )}
         {message.content && <MessageContent content={message.content} />}
         {message.attachmentUrl && <Attachment message={message} />}
+        {message.workThreadId && (
+          <Button asChild variant="outline" size="sm" className="my-2 gap-2">
+            <Link href={`/work/${message.workThreadId}`}>
+              <Bot className="size-4" />
+              Abrir conversación con el orquestador
+            </Link>
+          </Button>
+        )}
         {onOpenThread && replyCount > 0 && (
           <Button
             variant="ghost"

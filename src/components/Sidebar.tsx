@@ -208,6 +208,13 @@ export default function Sidebar({
             <Server /> Máquinas compartidas
           </NavLink>
           <NavLink
+            href="/work"
+            active={pathname.startsWith("/work")}
+            onClick={onNavigate}
+          >
+            <ListTodo /> Hilos de trabajo
+          </NavLink>
+          <NavLink
             href="/tasks"
             active={pathname === "/tasks"}
             onClick={onNavigate}

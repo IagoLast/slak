@@ -77,6 +77,11 @@ export async function POST(
 
   const body = await req.json().catch(() => null);
   const content = body?.content ? String(body.content).trim() : null;
+  if (content && content.length > 16000)
+    return NextResponse.json(
+      { error: "El mensaje no puede superar los 16.000 caracteres." },
+      { status: 400 },
+    );
   const attachmentUrl = body?.attachmentUrl ? String(body.attachmentUrl) : null;
   const attachmentName = body?.attachmentName
     ? String(body.attachmentName)

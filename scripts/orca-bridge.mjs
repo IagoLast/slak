@@ -2,7 +2,8 @@
 /** Run this bridge on the same host as Orca and the shared worktrees. */
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { readFile, writeFile, mkdir, rm } from "node:fs/promises";
+import { readFile, writeFile, mkdir, rm, rename } from "node:fs/promises";
+import { createWorkBridge } from "./orca-work.mjs";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
@@ -295,8 +296,27 @@ async function main() {
   const state = JSON.parse(
     await readFile(statePath, "utf8").catch(() => '{"commands":{},"tasks":{}}'),
   );
-  const save = async () =>
-    writeFile(statePath, JSON.stringify(state), { mode: 0o600 });
+  let saving = Promise.resolve();
+  const save = () => {
+    saving = saving
+      .catch(() => {})
+      .then(async () => {
+        await writeFile(`${statePath}.tmp`, JSON.stringify(state), {
+          mode: 0o600,
+        });
+        await rename(`${statePath}.tmp`, statePath);
+      });
+    return saving;
+  };
+  const workTick = createWorkBridge({
+    config,
+    configPath,
+    state,
+    save,
+    call,
+    run: orca,
+    worktrees: values.worktree,
+  });
   let stopped = false,
     client;
   process.on("SIGINT", () => {
@@ -426,6 +446,16 @@ async function main() {
         }
         for (const id of Object.keys(state.tasks))
           if (!tasks.some((t) => t.id === id)) delete state.tasks[id];
+        // Compaction may take longer than one heartbeat. Keep presence alive
+        // without publishing a different catalog midway through this tick.
+        const heartbeat = setInterval(() => {
+          if (client) void call(client, "heartbeat").catch(() => {});
+        }, 15000);
+        try {
+          await workTick(client, catalog);
+        } finally {
+          clearInterval(heartbeat);
+        }
         await save();
         if (values.once) break;
       } catch (error) {

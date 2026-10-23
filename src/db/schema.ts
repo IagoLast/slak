@@ -7,6 +7,7 @@ import {
   primaryKey,
   text,
   timestamp,
+  integer,
 } from "drizzle-orm/pg-core";
 
 export const users = pgTable("users", {
@@ -151,6 +152,9 @@ export const agents = pgTable(
       .primaryKey()
       .references(() => users.id, { onDelete: "cascade" }),
     handle: text("handle").notNull().unique(),
+    mode: text("mode", { enum: ["session", "orchestrator"] })
+      .notNull()
+      .default("session"),
     description: text("description").notNull().default(""),
     machine: text("machine").notNull().default(""),
     machineId: text("machine_id").references(() => machines.id),
@@ -270,3 +274,153 @@ export const machineCommands = pgTable("machine_commands", {
     .notNull()
     .defaultNow(),
 });
+
+// A bot is an identity. A work thread owns its workspace and durable conversation;
+// sessions are replaceable runtimes, never the identity or the source of truth.
+export const workThreads = pgTable(
+  "work_threads",
+  {
+    id: text("id").primaryKey(),
+    agentId: text("agent_id")
+      .notNull()
+      .references(() => agents.id, { onDelete: "cascade" }),
+    channelId: text("channel_id")
+      .notNull()
+      .references(() => channels.id, { onDelete: "cascade" }),
+    rootMessageId: text("root_message_id")
+      .notNull()
+      .references(() => messages.id, { onDelete: "cascade" }),
+    title: text("title").notNull(),
+    objective: text("objective").notNull(),
+    repository: text("repository").notNull(),
+    worktree: text("worktree"),
+    createdBy: text("created_by")
+      .notNull()
+      .references(() => users.id),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [uniqueIndex("work_thread_root_bot").on(t.rootMessageId, t.agentId)],
+);
+
+export const workSessions = pgTable(
+  "work_sessions",
+  {
+    id: text("id").primaryKey(),
+    threadId: text("thread_id")
+      .notNull()
+      .references(() => workThreads.id, { onDelete: "cascade" }),
+    parentId: text("parent_id"),
+    name: text("name").notNull(),
+    role: text("role", { enum: ["orchestrator", "worker"] }).notNull(),
+    state: text("state", {
+      enum: ["idle", "running", "waiting", "stopped", "error"],
+    })
+      .notNull()
+      .default("idle"),
+    runtimeId: text("runtime_id"),
+    generation: integer("generation").notNull().default(1),
+    memory: text("memory").notNull().default(""),
+    memoryVersion: integer("memory_version").notNull().default(0),
+    context: jsonb("context")
+      .$type<{ tokens?: number; window?: number; compactedAt?: string }>()
+      .notNull()
+      .default({}),
+    tokenHash: text("token_hash").unique(),
+    error: text("error"),
+    lastSeenAt: timestamp("last_seen_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("work_thread_coordinator")
+      .on(t.threadId)
+      .where(sql`${t.role} = 'orchestrator'`),
+  ],
+);
+
+export const workTurns = pgTable(
+  "work_turns",
+  {
+    id: text("id").primaryKey(),
+    sessionId: text("session_id")
+      .notNull()
+      .references(() => workSessions.id, { onDelete: "cascade" }),
+    messageId: text("message_id").references(() => messages.id, {
+      onDelete: "cascade",
+    }),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id),
+    prompt: text("prompt").notNull(),
+    kind: text("kind", { enum: ["human", "delegation", "notification"] })
+      .notNull()
+      .default("human"),
+    status: text("status", {
+      enum: ["queued", "running", "completed", "failed", "cancelled"],
+    })
+      .notNull()
+      .default("queued"),
+    result: text("result"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("work_session_running_turn")
+      .on(t.sessionId)
+      .where(sql`${t.status} = 'running'`),
+    index("work_session_queue").on(t.sessionId, t.createdAt),
+    uniqueIndex("work_message_delivery").on(t.sessionId, t.messageId),
+  ],
+);
+
+export const workEvents = pgTable(
+  "work_events",
+  {
+    sessionId: text("session_id")
+      .notNull()
+      .references(() => workSessions.id, { onDelete: "cascade" }),
+    itemId: text("item_id").notNull(),
+    revision: integer("revision").notNull(),
+    sequence: integer("sequence").notNull(),
+    body: jsonb("body").$type<Record<string, unknown>>().notNull(),
+    observedAt: timestamp("observed_at", { withTimezone: true }).notNull(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.sessionId, t.itemId] }),
+    index("work_events_time").on(t.sessionId, t.observedAt),
+  ],
+);
+
+export const workActions = pgTable(
+  "work_actions",
+  {
+    id: text("id").primaryKey(),
+    sessionId: text("session_id")
+      .notNull()
+      .references(() => workSessions.id, { onDelete: "cascade" }),
+    kind: text("kind", {
+      enum: ["workspace", "stop", "compact", "rotate", "respond"],
+    }).notNull(),
+    payload: jsonb("payload")
+      .$type<Record<string, unknown>>()
+      .notNull()
+      .default({}),
+    status: text("status", {
+      enum: ["queued", "running", "completed", "failed"],
+    })
+      .notNull()
+      .default("queued"),
+    error: text("error"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [index("work_actions_pending").on(t.sessionId, t.status)],
+);

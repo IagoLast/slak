@@ -3,7 +3,14 @@ import { nanoid } from "nanoid";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { db } from "@/db";
-import { agents, machines, machineCommands } from "@/db/schema";
+import {
+  agents,
+  machines,
+  machineCommands,
+  workSessions,
+  workThreads,
+  workActions,
+} from "@/db/schema";
 import { getSessionUser } from "@/lib/session";
 export async function POST(
   req: Request,
@@ -39,6 +46,27 @@ export async function POST(
       { status: 409 },
     );
   const { action } = parsed.data;
+  if (agent.mode === "orchestrator") {
+    await db.transaction(async (tx) => {
+      await tx.select().from(agents).where(eq(agents.id, id)).for("update");
+      await tx
+        .update(agents)
+        .set({ state: action === "stop" ? "stopped" : "ready", error: null })
+        .where(eq(agents.id, id));
+      if (action === "stop") {
+        const sessions = await tx
+          .select({ id: workSessions.id })
+          .from(workSessions)
+          .innerJoin(workThreads, eq(workThreads.id, workSessions.threadId))
+          .where(eq(workThreads.agentId, id));
+        for (const session of sessions)
+          await tx
+            .insert(workActions)
+            .values({ id: nanoid(), sessionId: session.id, kind: "stop" });
+      }
+    });
+    return NextResponse.json({ queued: true }, { status: 202 });
+  }
   if (
     (action === "start" && !["stopped", "error"].includes(agent.state)) ||
     (action === "stop" && !["ready", "error"].includes(agent.state))
@@ -58,14 +86,12 @@ export async function POST(
       .where(and(eq(agents.id, id), eq(agents.state, agent.state)))
       .returning();
     if (!rows.length) return false;
-    await tx
-      .insert(machineCommands)
-      .values({
-        id: nanoid(),
-        machineId: agent.machineId!,
-        agentId: id,
-        action: action === "start" && !agent.worktree ? "create" : action,
-      });
+    await tx.insert(machineCommands).values({
+      id: nanoid(),
+      machineId: agent.machineId!,
+      agentId: id,
+      action: action === "start" && !agent.worktree ? "create" : action,
+    });
     return true;
   });
   return NextResponse.json(

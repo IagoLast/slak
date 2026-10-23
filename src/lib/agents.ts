@@ -8,7 +8,9 @@ import {
   channelMembers,
   channels,
   messages,
+  workThreads,
 } from "@/db/schema";
+import { enqueueWork } from "@/lib/work";
 import type { SessionUser } from "@/lib/session";
 
 export function hashToken(token: string) {
@@ -50,7 +52,7 @@ export async function queueAgentMessages(
     .from(channels)
     .where(eq(channels.id, input.channelId));
   const recipients = await tx
-    .select({ id: agents.id, handle: agents.handle })
+    .select({ id: agents.id, handle: agents.handle, mode: agents.mode })
     .from(agents)
     .innerJoin(channelMembers, eq(channelMembers.userId, agents.id))
     .where(
@@ -64,12 +66,35 @@ export async function queueAgentMessages(
       m[1].toLowerCase(),
     ),
   );
+  const [source] = await tx
+    .select()
+    .from(messages)
+    .where(eq(messages.id, input.messageId));
+  const existing = source.parentId
+    ? await tx
+        .select({ agentId: workThreads.agentId })
+        .from(workThreads)
+        .where(eq(workThreads.rootMessageId, source.parentId))
+    : [];
   const targets = recipients.filter(
-    (a) => channel.type === "dm" || mentions.has(a.handle),
+    (a) =>
+      channel.type === "dm" ||
+      mentions.has(a.handle) ||
+      existing.some((t) => t.agentId === a.id),
   );
-  if (targets.length)
+  for (const bot of targets.filter((a) => a.mode === "orchestrator")) {
+    await enqueueWork(tx, {
+      agentId: bot.id,
+      channelId: input.channelId,
+      messageId: input.messageId,
+      userId: input.user.id,
+      prompt: input.content,
+    });
+  }
+  const legacy = targets.filter((a) => a.mode === "session");
+  if (legacy.length)
     await tx.insert(agentTasks).values(
-      targets.map((a) => ({
+      legacy.map((a) => ({
         id: nanoid(),
         agentId: a.id,
         channelId: input.channelId,

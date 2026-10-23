@@ -18,6 +18,7 @@ export async function GET() {
       id: agents.id,
       name: users.name,
       handle: agents.handle,
+      mode: agents.mode,
       description: agents.description,
       machine: agents.machine,
       machineId: agents.machineId,
@@ -58,6 +59,7 @@ export async function GET() {
 const createSchema = z.object({
   name: z.string().trim().min(1).max(80),
   handle: z.string().regex(/^[a-z0-9][a-z0-9_-]{1,39}$/),
+  mode: z.enum(["session", "orchestrator"]).default("session"),
   description: z.string().trim().max(500).default(""),
   machine: z.string().trim().max(100).default(""),
   machineId: z.string().optional(),
@@ -85,6 +87,14 @@ export async function POST(req: Request) {
       { status: 400 },
     );
   const { name, ...profile } = parsed.data;
+  if (
+    profile.mode === "orchestrator" &&
+    (!profile.machineId || profile.worktree)
+  )
+    return NextResponse.json(
+      { error: "Elige una máquina y un proyecto para el bot." },
+      { status: 400 },
+    );
   const machine = profile.machineId
     ? await db.query.machines.findFirst({
         where: eq(machines.id, profile.machineId),
@@ -122,39 +132,38 @@ export async function POST(req: Request) {
   const { token, tokenHash } = newAgentToken();
   try {
     await db.transaction(async (tx) => {
-      await tx
-        .insert(users)
-        .values({
-          id,
-          name,
-          email: `${id}@agents.slak.invalid`,
-          passwordHash: "disabled",
-          kind: "agent",
-          role: "guest",
-          lastSeenAt: new Date(0),
+      await tx.insert(users).values({
+        id,
+        name,
+        email: `${id}@agents.slak.invalid`,
+        passwordHash: "disabled",
+        kind: "agent",
+        role: "guest",
+        lastSeenAt: new Date(0),
+      });
+      await tx.insert(agents).values({
+        id,
+        ...profile,
+        machine: machine?.name ?? profile.machine,
+        worktree: session?.worktree ?? (machine ? "" : profile.worktree),
+        runtimeHandle: session?.runtimeHandle,
+        provider: session?.provider ?? profile.provider,
+        state:
+          session || profile.mode === "orchestrator"
+            ? "ready"
+            : machine
+              ? "starting"
+              : "external",
+        tokenHash: machine ? null : tokenHash,
+        createdBy: user.id,
+      });
+      if (machine && !session && profile.mode !== "orchestrator")
+        await tx.insert(machineCommands).values({
+          id: nanoid(),
+          machineId: machine.id,
+          agentId: id,
+          action: "create",
         });
-      await tx
-        .insert(agents)
-        .values({
-          id,
-          ...profile,
-          machine: machine?.name ?? profile.machine,
-          worktree: session?.worktree ?? (machine ? "" : profile.worktree),
-          runtimeHandle: session?.runtimeHandle,
-          provider: session?.provider ?? profile.provider,
-          state: session ? "ready" : machine ? "starting" : "external",
-          tokenHash: machine ? null : tokenHash,
-          createdBy: user.id,
-        });
-      if (machine && !session)
-        await tx
-          .insert(machineCommands)
-          .values({
-            id: nanoid(),
-            machineId: machine.id,
-            agentId: id,
-            action: "create",
-          });
     });
   } catch (error) {
     const cause = error as { cause?: { code?: string }; code?: string };

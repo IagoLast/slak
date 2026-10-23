@@ -121,6 +121,44 @@ const STATEMENTS = [
   sql`CREATE UNIQUE INDEX IF NOT EXISTS "agent_one_running_task" ON "agent_tasks" ("agent_id") WHERE "status" = 'running'`,
   sql`ALTER TABLE "machines" ADD COLUMN IF NOT EXISTS "sessions" jsonb NOT NULL DEFAULT '[]'`,
   sql`CREATE UNIQUE INDEX IF NOT EXISTS "agent_machine_worktree" ON "agents" ("machine_id", "worktree") WHERE "worktree" <> '' AND "machine_id" IS NOT NULL`,
+  sql`ALTER TABLE agents ADD COLUMN IF NOT EXISTS mode text NOT NULL DEFAULT 'session'`,
+  sql`CREATE TABLE IF NOT EXISTS work_threads (
+    id text PRIMARY KEY, agent_id text NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+    channel_id text NOT NULL REFERENCES channels(id) ON DELETE CASCADE,
+    root_message_id text NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
+    title text NOT NULL, objective text NOT NULL, repository text NOT NULL, worktree text,
+    created_by text NOT NULL REFERENCES users(id), created_at timestamptz NOT NULL DEFAULT now()
+  )`,
+  sql`CREATE UNIQUE INDEX IF NOT EXISTS work_thread_root_bot ON work_threads(root_message_id, agent_id)`,
+  sql`CREATE TABLE IF NOT EXISTS work_sessions (
+    id text PRIMARY KEY, thread_id text NOT NULL REFERENCES work_threads(id) ON DELETE CASCADE,
+    parent_id text, name text NOT NULL, role text NOT NULL, state text NOT NULL DEFAULT 'idle',
+    runtime_id text, generation integer NOT NULL DEFAULT 1, memory text NOT NULL DEFAULT '',
+    memory_version integer NOT NULL DEFAULT 0, context jsonb NOT NULL DEFAULT '{}', token_hash text UNIQUE,
+    error text, last_seen_at timestamptz, created_at timestamptz NOT NULL DEFAULT now()
+  )`,
+  sql`CREATE UNIQUE INDEX IF NOT EXISTS work_thread_coordinator ON work_sessions(thread_id) WHERE role = 'orchestrator'`,
+  sql`CREATE TABLE IF NOT EXISTS work_turns (
+    id text PRIMARY KEY, session_id text NOT NULL REFERENCES work_sessions(id) ON DELETE CASCADE,
+    message_id text REFERENCES messages(id) ON DELETE CASCADE, user_id text NOT NULL REFERENCES users(id),
+    prompt text NOT NULL, kind text NOT NULL DEFAULT 'human', status text NOT NULL DEFAULT 'queued', result text,
+    created_at timestamptz NOT NULL DEFAULT now(), updated_at timestamptz NOT NULL DEFAULT now()
+  )`,
+  sql`CREATE UNIQUE INDEX IF NOT EXISTS work_session_running_turn ON work_turns(session_id) WHERE status = 'running'`,
+  sql`CREATE INDEX IF NOT EXISTS work_session_queue ON work_turns(session_id, created_at)`,
+  sql`CREATE UNIQUE INDEX IF NOT EXISTS work_message_delivery ON work_turns(session_id, message_id)`,
+  sql`CREATE TABLE IF NOT EXISTS work_events (
+    session_id text NOT NULL REFERENCES work_sessions(id) ON DELETE CASCADE, item_id text NOT NULL,
+    revision integer NOT NULL, sequence integer NOT NULL, body jsonb NOT NULL, observed_at timestamptz NOT NULL,
+    PRIMARY KEY(session_id, item_id)
+  )`,
+  sql`CREATE INDEX IF NOT EXISTS work_events_time ON work_events(session_id, observed_at)`,
+  sql`CREATE TABLE IF NOT EXISTS work_actions (
+    id text PRIMARY KEY, session_id text NOT NULL REFERENCES work_sessions(id) ON DELETE CASCADE,
+    kind text NOT NULL, payload jsonb NOT NULL DEFAULT '{}', status text NOT NULL DEFAULT 'queued', error text,
+    created_at timestamptz NOT NULL DEFAULT now()
+  )`,
+  sql`CREATE INDEX IF NOT EXISTS work_actions_pending ON work_actions(session_id, status)`,
 ];
 
 const SCHEMA_VERSION = STATEMENTS.length;

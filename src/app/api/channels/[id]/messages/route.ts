@@ -3,7 +3,7 @@ import { queueAgentMessages } from "@/lib/agents";
 import { nanoid } from "nanoid";
 import { NextResponse } from "next/server";
 import { db } from "@/db";
-import { messages, users } from "@/db/schema";
+import { messages, users, workThreads } from "@/db/schema";
 import { getAccessibleChannel, markChannelRead } from "@/lib/channels";
 import { getSessionUser } from "@/lib/session";
 
@@ -31,6 +31,9 @@ export async function GET(req: Request, { params }: Params) {
       attachmentType: messages.attachmentType,
       createdAt: messages.createdAt,
       replyCount: sql<number>`(select count(*)::int from "messages" r where r."parent_id" = ${messages.id})`,
+      workThreadId: sql<
+        string | null
+      >`(select w.id from work_threads w where w.root_message_id = ${messages.id} order by w.created_at limit 1)`,
       user: { id: users.id, name: users.name, kind: users.kind },
     })
     .from(messages)
@@ -70,6 +73,11 @@ export async function POST(req: Request, { params }: Params) {
 
   const body = await req.json().catch(() => null);
   const content = body?.content ? String(body.content).trim() : null;
+  if (content && content.length > 16000)
+    return NextResponse.json(
+      { error: "El mensaje no puede superar los 16.000 caracteres." },
+      { status: 400 },
+    );
   const attachmentUrl = body?.attachmentUrl ? String(body.attachmentUrl) : null;
   const attachmentName = body?.attachmentName
     ? String(body.attachmentName)
@@ -99,5 +107,8 @@ export async function POST(req: Request, { params }: Params) {
   });
   await markChannelRead(user.id, id);
 
-  return NextResponse.json({ id: messageId });
+  const work = await db.query.workThreads.findFirst({
+    where: eq(workThreads.rootMessageId, messageId),
+  });
+  return NextResponse.json({ id: messageId, workThreadId: work?.id ?? null });
 }

@@ -46,3 +46,5 @@ slak-machine*.json
 slak-mcp*.json
 *.state.json
 *.json.lock/
+*.json.sessions/
+*.state.json.tmp

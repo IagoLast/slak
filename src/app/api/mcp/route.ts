@@ -12,7 +12,9 @@ import {
   machines,
   messages,
   users,
+  workSessions,
 } from "@/db/schema";
+import { registerWorkTools } from "@/lib/work-mcp";
 import {
   agentInbox,
   authenticateAgent,
@@ -45,13 +47,24 @@ export async function POST(request: Request) {
     : await db.query.machines.findFirst({
         where: eq(machines.tokenHash, hashToken(bearer)),
       });
-  if (!agent && !machine)
+  const workSession =
+    !agent && !machine
+      ? await db.query.workSessions.findFirst({
+          where: eq(workSessions.tokenHash, hashToken(bearer)),
+        })
+      : null;
+  if (!agent && !machine && !workSession)
     return new Response("Token revocado o no válido", {
       status: 401,
       headers: { "WWW-Authenticate": "Bearer" },
     });
 
   const server = new McpServer({ name: "slak", version: "1.0.0" });
+  if (workSession) {
+    registerWorkTools(server, { sessionId: workSession.id });
+    return serve(server, request);
+  }
+  if (machine) registerWorkTools(server, { machineId: machine.id });
   // The authenticated identity always determines scope; callers cannot impersonate another agent.
   async function taskOwner(taskId: string) {
     const task = await db.query.agentTasks.findFirst({
@@ -227,15 +240,13 @@ export async function POST(request: Request) {
         where: eq(messages.id, task.messageId),
       });
       const id = nanoid();
-      await db
-        .insert(messages)
-        .values({
-          id,
-          channelId: task.channelId,
-          userId: owner.id,
-          parentId: source!.parentId ?? source!.id,
-          content,
-        });
+      await db.insert(messages).values({
+        id,
+        channelId: task.channelId,
+        userId: owner.id,
+        parentId: source!.parentId ?? source!.id,
+        content,
+      });
       return output({ id });
     },
   );
@@ -388,6 +399,9 @@ export async function POST(request: Request) {
       },
     );
   }
+  return serve(server, request);
+}
+async function serve(server: McpServer, request: Request) {
   const transport = new WebStandardStreamableHTTPServerTransport({
     sessionIdGenerator: undefined,
     enableJsonResponse: true,

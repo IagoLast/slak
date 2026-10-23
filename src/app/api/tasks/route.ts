@@ -13,6 +13,7 @@ import {
 } from "@/db/schema";
 import { getAccessibleChannel } from "@/lib/channels";
 import { getSessionUser } from "@/lib/session";
+import { enqueueWork } from "@/lib/work";
 
 export async function GET(req: Request) {
   const user = await getSessionUser();
@@ -85,18 +86,25 @@ export async function POST(req: Request) {
     );
   const id = nanoid(),
     messageId = nanoid();
+  let workThreadId: string | null = null;
   await db.transaction(async (tx) => {
-    await tx
-      .insert(messages)
-      .values({
-        id: messageId,
+    await tx.insert(messages).values({
+      id: messageId,
+      channelId,
+      userId: user.id,
+      content: `Tarea para @${agent.agents.handle}:\n\n${prompt}`,
+    });
+    if (agent.agents.mode === "orchestrator") {
+      const thread = await enqueueWork(tx, {
+        agentId,
         channelId,
+        messageId,
         userId: user.id,
-        content: `Tarea para @${agent.agents.handle}:\n\n${prompt}`,
+        prompt,
       });
-    await tx
-      .insert(agentTasks)
-      .values({
+      workThreadId = thread.id;
+    } else
+      await tx.insert(agentTasks).values({
         id,
         agentId,
         channelId,
@@ -105,5 +113,5 @@ export async function POST(req: Request) {
         prompt,
       });
   });
-  return NextResponse.json({ id, messageId }, { status: 201 });
+  return NextResponse.json({ id, messageId, workThreadId }, { status: 201 });
 }

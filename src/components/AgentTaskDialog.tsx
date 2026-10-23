@@ -1,4 +1,5 @@
 "use client";
+import { useRouter } from "next/navigation";
 import { useState } from "react";
 import useSWR, { useSWRConfig } from "swr";
 import { toast } from "sonner";
@@ -28,6 +29,7 @@ export default function AgentTaskDialog({ channelId }: { channelId: string }) {
     [busy, setBusy] = useState(false),
     [error, setError] = useState("");
   const { mutate } = useSWRConfig();
+  const router = useRouter();
   const { data } = useSWR<{ agents: AgentContact[] }>(
     open ? "/api/agents" : null,
     fetcher,
@@ -45,12 +47,18 @@ export default function AgentTaskDialog({ channelId }: { channelId: string }) {
     setBusy(true);
     setError("");
     try {
-      await api("/api/tasks", "POST", { channelId, agentId, prompt });
+      const result = await api<{ workThreadId: string | null }>(
+        "/api/tasks",
+        "POST",
+        { channelId, agentId, prompt },
+      );
       setOpen(false);
       setPrompt("");
       toast.success("Tarea en cola");
       void mutate(`/api/channels/${channelId}/messages`);
       void mutate(`/api/tasks?channelId=${channelId}`);
+      void mutate(`/api/work?channelId=${channelId}`);
+      if (result.workThreadId) router.push(`/work/${result.workThreadId}`);
     } catch (e) {
       setError((e as Error).message);
     } finally {

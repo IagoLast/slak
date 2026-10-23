@@ -49,6 +49,7 @@ export type ChatMessage = {
   attachmentType: "file" | "image" | "audio" | null;
   createdAt: string;
   replyCount?: number;
+  workThreadId?: string | null;
   user: { id: string; name: string; kind?: "human" | "agent" };
 };
 
@@ -56,6 +57,7 @@ export type AgentContact = {
   id: string;
   name: string;
   handle: string;
+  mode: "session" | "orchestrator";
   description: string;
   machine: string;
   online: boolean;
@@ -66,6 +68,74 @@ export type AgentContact = {
   provider: "codex" | "claude";
   state: "external" | "starting" | "ready" | "stopping" | "stopped" | "error";
   error: string | null;
+};
+
+export type WorkThreadSummary = {
+  id: string;
+  title: string;
+  channelId: string;
+  rootMessageId: string;
+  worktree: string | null;
+  handle: string;
+  machine: string | null;
+  state: "idle" | "running" | "waiting" | "stopped" | "error";
+  createdAt: string;
+};
+export type WorkSession = {
+  id: string;
+  name: string;
+  role: "orchestrator" | "worker";
+  parentId: string | null;
+  state: WorkThreadSummary["state"];
+  memory: string;
+  memoryVersion: number;
+  generation: number;
+  context: { tokens?: number; window?: number; compactedAt?: string };
+  error: string | null;
+  lastSeenAt: string | null;
+};
+export type WorkEvent = {
+  sessionId: string;
+  itemId: string;
+  revision: number;
+  sequence: number;
+  observedAt: string;
+  body: Record<string, unknown>;
+};
+export type WorkTurn = {
+  id: string;
+  prompt: string;
+  result: string | null;
+  kind: "human" | "delegation" | "notification";
+  status: "queued" | "running" | "completed" | "failed" | "cancelled";
+  createdAt: string;
+  author: string;
+};
+export type WorkConversationData = {
+  thread: {
+    id: string;
+    title: string;
+    objective: string;
+    worktree: string | null;
+    channelId: string;
+    rootMessageId: string;
+  };
+  sessions: WorkSession[];
+  selectedId: string;
+  events: WorkEvent[];
+  turns: WorkTurn[];
+  actions: { id: string; kind: string; status: string; error: string | null }[];
+  bot: {
+    handle: string;
+    name: string;
+    machine: string;
+    state: string;
+    lastSeenAt: string | null;
+    online: boolean;
+  };
+  canSend: boolean;
+  hasOlder: boolean;
+  next: { events: string | null; turns: string | null };
 };
 
 export type SharedMachine = {

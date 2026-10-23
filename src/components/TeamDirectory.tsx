@@ -148,7 +148,7 @@ export default function TeamDirectory({
           </h1>
           <p className="mt-1 max-w-xl text-sm text-muted-foreground">
             {isAgents
-              ? "Sesiones de Orca con las que todo el equipo puede trabajar."
+              ? "Bots del equipo. Cada encargo tiene su propio hilo, contexto y subagentes."
               : "Conecta tu Orca local y comparte sus proyectos y sesiones con el equipo."}
           </p>
         </div>
@@ -210,7 +210,7 @@ export default function TeamDirectory({
                 </h2>
                 <p className="mx-auto mt-2 max-w-md text-sm text-muted-foreground">
                   {isAgents
-                    ? "Comparte una sesión existente o crea un nuevo worktree en una máquina conectada. Cada agente conserva su contexto y su conversación."
+                    ? "Crea un orquestador en una máquina conectada. Menciónalo desde un canal para abrir un hilo de trabajo compartido."
                     : "Orca ejecuta el trabajo en tu equipo. Slak reúne las conversaciones, los agentes y las tareas de todos."}
                 </p>
               </div>
@@ -248,6 +248,11 @@ export default function TeamDirectory({
                     </div>
                     <CardTitle>{agent.name}</CardTitle>
                     <CardDescription>@{agent.handle}</CardDescription>
+                    {agent.mode === "orchestrator" && (
+                      <Badge variant="secondary" className="w-fit">
+                        Orquestador · contexto por hilo
+                      </Badge>
+                    )}
                   </CardHeader>
                   <CardContent className="space-y-3 text-sm">
                     <p className="min-h-10 text-muted-foreground">
@@ -263,7 +268,7 @@ export default function TeamDirectory({
                         <Server className="size-3.5" />
                         {agent.machine || "Conexión MCP"}
                       </p>
-                      {agent.worktree && (
+                      {agent.worktree && agent.mode !== "orchestrator" && (
                         <p
                           className="flex items-center gap-2"
                           title={agent.worktree}
@@ -290,6 +295,27 @@ export default function TeamDirectory({
                       <MessageSquare />
                       Hablar
                     </Button>
+                    {member && agent.machineId && agent.mode === "session" && (
+                      <Button
+                        variant="outline"
+                        disabled={busy}
+                        title="Usa este alias para nuevos hilos con contexto independiente. La sesión anterior se conserva en Orca."
+                        onClick={() =>
+                          act(async () => {
+                            await api(
+                              `/api/agents/${agent.id}/orchestrator`,
+                              "POST",
+                            );
+                            toast.success(
+                              "Orquestador activado. Los nuevos encargos abrirán sus propios hilos.",
+                            );
+                          })
+                        }
+                      >
+                        <Bot />
+                        Activar orquestador
+                      </Button>
+                    )}
                     {member &&
                       agent.machineId &&
                       (agent.state === "ready" ? (
@@ -512,7 +538,7 @@ function CreateDialog({
     [handle, setHandle] = useState(""),
     [description, setDescription] = useState("");
   const [handleEdited, setHandleEdited] = useState(false);
-  const [mode, setMode] = useState("existing"),
+  const [mode, setMode] = useState("orchestrator"),
     [machineId, setMachineId] = useState(""),
     [repository, setRepository] = useState(""),
     [worktree, setWorktree] = useState(""),
@@ -541,6 +567,7 @@ function CreateDialog({
               name,
               handle,
               description,
+              mode: mode === "orchestrator" ? "orchestrator" : "session",
               ...(mode !== "mcp" && {
                 machineId,
                 repository,
@@ -573,7 +600,7 @@ function CreateDialog({
           <DialogDescription>
             {machine
               ? "Tu equipo podrá trabajar con los proyectos y las sesiones que compartas desde tu máquina."
-              : "Cada agente es una sesión persistente en un worktree de Orca."}
+              : "Un orquestador coordina cada hilo con contexto propio y puede crear worktrees y subagentes."}
           </DialogDescription>
         </DialogHeader>
         <form className="space-y-4" onSubmit={submit}>
@@ -584,6 +611,9 @@ function CreateDialog({
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
+                  <SelectItem value="orchestrator">
+                    Crear un bot orquestador
+                  </SelectItem>
                   <SelectItem value="existing">
                     Compartir una sesión existente
                   </SelectItem>
@@ -616,7 +646,7 @@ function CreateDialog({
                       .slice(0, 40),
                   );
               }}
-              placeholder={machine ? "MacBook de Ana" : "Frontend · Ana"}
+              placeholder={machine ? "MacBook de Ana" : "Iago bot"}
             />
           </Field>
           {!machine && (
@@ -631,7 +661,7 @@ function CreateDialog({
                     setHandleEdited(true);
                     setHandle(e.target.value);
                   }}
-                  placeholder="frontend-ana"
+                  placeholder="iago-bot"
                 />
               </Field>
               <Field label="Qué hace este agente" id="agent-description">
