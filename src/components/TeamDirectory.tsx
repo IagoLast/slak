@@ -27,6 +27,9 @@ import {
   fetcher,
 } from "@/lib/client";
 import { PresenceDot } from "@/components/Sidebar";
+import MachineConnectDialog, {
+  type MachinePairing,
+} from "@/components/MachineConnectDialog";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -92,8 +95,9 @@ export default function TeamDirectory({
     [create, setCreate] = useState(false);
   const [connection, setConnection] = useState<{
     token: string;
-    machine: boolean;
   } | null>(null);
+  const [machineConnection, setMachineConnection] =
+    useState<MachinePairing | null>(null);
   const [stop, setStop] = useState<AgentContact | null>(null),
     [disconnect, setDisconnect] = useState<SharedMachine | null>(null);
   const [busy, setBusy] = useState(false);
@@ -136,6 +140,16 @@ export default function TeamDirectory({
       router.push(`/c/${channelId}`);
     });
   }
+  async function connectMachine(machineId?: string) {
+    await act(async () => {
+      const pairing = await api<MachinePairing>(
+        "/api/machines/pairing",
+        "POST",
+        { machineId },
+      );
+      setMachineConnection({ ...pairing, machineId });
+    });
+  }
   const isAgents = view === "agents",
     ready = isAgents ? !!agentData : !!machineData,
     error = isAgents ? agentError : machineError;
@@ -153,7 +167,10 @@ export default function TeamDirectory({
           </p>
         </div>
         {member && (
-          <Button onClick={() => setCreate(true)}>
+          <Button
+            disabled={busy}
+            onClick={() => (isAgents ? setCreate(true) : void connectMachine())}
+          >
             <Plus />
             {isAgents ? "Crear o compartir agente" : "Conectar mi Orca"}
           </Button>
@@ -215,7 +232,13 @@ export default function TeamDirectory({
                 </p>
               </div>
               {!query && member && (
-                <Button variant="outline" onClick={() => setCreate(true)}>
+                <Button
+                  variant="outline"
+                  disabled={busy}
+                  onClick={() =>
+                    isAgents ? setCreate(true) : void connectMachine()
+                  }
+                >
                   {isAgents
                     ? "Añadir el primer agente"
                     : "Conectar una máquina"}
@@ -357,7 +380,7 @@ export default function TeamDirectory({
                               `/api/agents/${agent.id}/token`,
                               "POST",
                             );
-                            setConnection({ token, machine: false });
+                            setConnection({ token });
                           })
                         }
                       >
@@ -408,18 +431,10 @@ export default function TeamDirectory({
                       <>
                         <Button
                           variant="ghost"
-                          disabled={busy}
-                          onClick={() =>
-                            act(async () => {
-                              const { token } = await api<{ token: string }>(
-                                `/api/machines/${machine.id}`,
-                                "POST",
-                              );
-                              setConnection({ token, machine: true });
-                            })
-                          }
+                          disabled={busy || machine.online}
+                          onClick={() => void connectMachine(machine.id)}
                         >
-                          <KeyRound />
+                          <Plug />
                           Conectar
                         </Button>
                         {machine.enabled && (
@@ -439,19 +454,27 @@ export default function TeamDirectory({
       </div>
       {create && (
         <CreateDialog
-          machine={!isAgents}
           machines={machineData?.machines ?? []}
           agents={agentData?.agents ?? []}
           onClose={() => setCreate(false)}
           onCreated={(token) => {
             setCreate(false);
-            if (token) setConnection({ token, machine: !isAgents });
+            if (token) setConnection({ token });
             void refresh();
           }}
         />
       )}
       {connection && (
         <ConnectionDialog {...connection} onClose={() => setConnection(null)} />
+      )}
+      {machineConnection && (
+        <MachineConnectDialog
+          key={machineConnection.id}
+          pairing={machineConnection}
+          busy={busy}
+          onRetry={(machineId) => void connectMachine(machineId)}
+          onClose={() => setMachineConnection(null)}
+        />
       )}
       <AlertDialog
         open={!!stop}
@@ -522,13 +545,11 @@ export default function TeamDirectory({
 }
 
 function CreateDialog({
-  machine,
   machines,
   agents,
   onClose,
   onCreated,
 }: {
-  machine: boolean;
   machines: SharedMachine[];
   agents: AgentContact[];
   onClose: () => void;
@@ -558,31 +579,21 @@ function CreateDialog({
     setBusy(true);
     setError("");
     try {
-      const data = await api<{ token: string | null }>(
-        machine ? "/api/machines" : "/api/agents",
-        "POST",
-        machine
-          ? { name }
-          : {
-              name,
-              handle,
-              description,
-              mode: mode === "orchestrator" ? "orchestrator" : "session",
-              ...(mode !== "mcp" && {
-                machineId,
-                repository,
-                worktree: mode === "existing" ? worktree : "",
-                provider,
-              }),
-            },
-      );
+      const data = await api<{ token: string | null }>("/api/agents", "POST", {
+        name,
+        handle,
+        description,
+        mode: mode === "orchestrator" ? "orchestrator" : "session",
+        ...(mode !== "mcp" && {
+          machineId,
+          repository,
+          worktree: mode === "existing" ? worktree : "",
+          provider,
+        }),
+      });
       onCreated(data.token);
       toast.success(
-        machine
-          ? "Máquina creada: conecta ahora el puente local"
-          : mode === "new"
-            ? "Creando agente en Orca"
-            : "Agente compartido",
+        mode === "new" ? "Creando agente en Orca" : "Agente compartido",
       );
     } catch (e) {
       setError((e as Error).message);
@@ -594,43 +605,35 @@ function CreateDialog({
     <Dialog open onOpenChange={(v) => !v && onClose()}>
       <DialogContent className="max-h-[90dvh] overflow-auto">
         <DialogHeader>
-          <DialogTitle>
-            {machine ? "Conectar mi Orca" : "Compartir un agente"}
-          </DialogTitle>
+          <DialogTitle>Compartir un agente</DialogTitle>
           <DialogDescription>
-            {machine
-              ? "Tu equipo podrá trabajar con los proyectos y las sesiones que compartas desde tu máquina."
-              : "Un orquestador coordina cada hilo con contexto propio y puede crear worktrees y subagentes."}
+            Un orquestador coordina cada hilo con contexto propio y puede crear
+            worktrees y subagentes.
           </DialogDescription>
         </DialogHeader>
         <form className="space-y-4" onSubmit={submit}>
-          {!machine && (
-            <Field label="Cómo quieres conectarlo" id="agent-mode">
-              <Select value={mode} onValueChange={setMode}>
-                <SelectTrigger id="agent-mode" className="w-full">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="orchestrator">
-                    Crear un bot orquestador
-                  </SelectItem>
-                  <SelectItem value="existing">
-                    Compartir una sesión existente
-                  </SelectItem>
-                  <SelectItem value="new">
-                    Crear un worktree y un agente
-                  </SelectItem>
-                  <SelectItem value="mcp">
-                    Conectar un agente externo por MCP
-                  </SelectItem>
-                </SelectContent>
-              </Select>
-            </Field>
-          )}
-          <Field
-            label={machine ? "Nombre de tu máquina" : "Nombre del agente"}
-            id="entity-name"
-          >
+          <Field label="Cómo quieres conectarlo" id="agent-mode">
+            <Select value={mode} onValueChange={setMode}>
+              <SelectTrigger id="agent-mode" className="w-full">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="orchestrator">
+                  Crear un bot orquestador
+                </SelectItem>
+                <SelectItem value="existing">
+                  Compartir una sesión existente
+                </SelectItem>
+                <SelectItem value="new">
+                  Crear un worktree y un agente
+                </SelectItem>
+                <SelectItem value="mcp">
+                  Conectar un agente externo por MCP
+                </SelectItem>
+              </SelectContent>
+            </Select>
+          </Field>
+          <Field label="Nombre del agente" id="entity-name">
             <Input
               id="entity-name"
               required
@@ -646,134 +649,126 @@ function CreateDialog({
                       .slice(0, 40),
                   );
               }}
-              placeholder={machine ? "MacBook de Ana" : "Iago bot"}
+              placeholder="Iago bot"
             />
           </Field>
-          {!machine && (
-            <>
-              <Field label="Alias para menciones" id="agent-handle">
-                <Input
-                  id="agent-handle"
-                  required
-                  pattern="[a-z0-9][a-z0-9_-]{1,39}"
-                  value={handle}
-                  onChange={(e) => {
-                    setHandleEdited(true);
-                    setHandle(e.target.value);
-                  }}
-                  placeholder="iago-bot"
-                />
-              </Field>
-              <Field label="Qué hace este agente" id="agent-description">
-                <Textarea
-                  id="agent-description"
-                  value={description}
-                  maxLength={500}
-                  onChange={(e) => setDescription(e.target.value)}
-                  placeholder="Contexto, responsabilidades o proyecto…"
-                />
-              </Field>
-              {mode !== "mcp" && (
-                <>
-                  <Field label="Máquina compartida" id="agent-machine">
+          <>
+            <Field label="Alias para menciones" id="agent-handle">
+              <Input
+                id="agent-handle"
+                required
+                pattern="[a-z0-9][a-z0-9_-]{1,39}"
+                value={handle}
+                onChange={(e) => {
+                  setHandleEdited(true);
+                  setHandle(e.target.value);
+                }}
+                placeholder="iago-bot"
+              />
+            </Field>
+            <Field label="Qué hace este agente" id="agent-description">
+              <Textarea
+                id="agent-description"
+                value={description}
+                maxLength={500}
+                onChange={(e) => setDescription(e.target.value)}
+                placeholder="Contexto, responsabilidades o proyecto…"
+              />
+            </Field>
+            {mode !== "mcp" && (
+              <>
+                <Field label="Máquina compartida" id="agent-machine">
+                  <Select
+                    value={machineId}
+                    onValueChange={(v) => {
+                      setMachineId(v);
+                      setRepository("");
+                      setWorktree("");
+                    }}
+                  >
+                    <SelectTrigger id="agent-machine" className="w-full">
+                      <SelectValue placeholder="Elige una máquina conectada" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {machines
+                        .filter((m) => m.online)
+                        .map((m) => (
+                          <SelectItem key={m.id} value={m.id}>
+                            {m.name} · {m.ownerName}
+                          </SelectItem>
+                        ))}
+                    </SelectContent>
+                  </Select>
+                </Field>
+                {!machines.some((m) => m.online) && (
+                  <p className="text-sm text-muted-foreground">
+                    Primero conecta tu Orca desde{" "}
+                    <Link href="/machines" className="text-primary underline">
+                      Máquinas compartidas
+                    </Link>
+                    .
+                  </p>
+                )}
+                {mode === "existing" ? (
+                  <Field label="Sesión de Orca" id="agent-session">
                     <Select
-                      value={machineId}
+                      value={worktree}
                       onValueChange={(v) => {
-                        setMachineId(v);
-                        setRepository("");
-                        setWorktree("");
+                        setWorktree(v);
+                        const s = sessions.find((s) => s.worktree === v);
+                        setRepository(s?.repository ?? "");
                       }}
                     >
-                      <SelectTrigger id="agent-machine" className="w-full">
-                        <SelectValue placeholder="Elige una máquina conectada" />
+                      <SelectTrigger id="agent-session" className="w-full">
+                        <SelectValue placeholder="Selecciona una sesión compartida" />
                       </SelectTrigger>
                       <SelectContent>
-                        {machines
-                          .filter((m) => m.online)
-                          .map((m) => (
-                            <SelectItem key={m.id} value={m.id}>
-                              {m.name} · {m.ownerName}
-                            </SelectItem>
-                          ))}
+                        {sessions.map((s) => (
+                          <SelectItem key={s.worktree} value={s.worktree}>
+                            {s.name} · {s.provider}
+                          </SelectItem>
+                        ))}
                       </SelectContent>
                     </Select>
+                    {selected && !sessions.length && (
+                      <p className="text-xs text-muted-foreground">
+                        No hay sesiones disponibles. Abre un agente en Orca o
+                        crea uno nuevo.
+                      </p>
+                    )}
                   </Field>
-                  {!machines.some((m) => m.online) && (
-                    <p className="text-sm text-muted-foreground">
-                      Primero conecta tu Orca desde{" "}
-                      <Link href="/machines" className="text-primary underline">
-                        Máquinas compartidas
-                      </Link>
-                      .
-                    </p>
-                  )}
-                  {mode === "existing" ? (
-                    <Field label="Sesión de Orca" id="agent-session">
-                      <Select
-                        value={worktree}
-                        onValueChange={(v) => {
-                          setWorktree(v);
-                          const s = sessions.find((s) => s.worktree === v);
-                          setRepository(s?.repository ?? "");
-                        }}
-                      >
-                        <SelectTrigger id="agent-session" className="w-full">
-                          <SelectValue placeholder="Selecciona una sesión compartida" />
+                ) : (
+                  <>
+                    <Field label="Proyecto" id="agent-repository">
+                      <Select value={repository} onValueChange={setRepository}>
+                        <SelectTrigger id="agent-repository" className="w-full">
+                          <SelectValue placeholder="Selecciona un proyecto" />
                         </SelectTrigger>
                         <SelectContent>
-                          {sessions.map((s) => (
-                            <SelectItem key={s.worktree} value={s.worktree}>
-                              {s.name} · {s.provider}
+                          {selected?.repositories.map((r) => (
+                            <SelectItem key={r.id} value={r.id}>
+                              {r.name}
                             </SelectItem>
                           ))}
                         </SelectContent>
                       </Select>
-                      {selected && !sessions.length && (
-                        <p className="text-xs text-muted-foreground">
-                          No hay sesiones disponibles. Abre un agente en Orca o
-                          crea uno nuevo.
-                        </p>
-                      )}
                     </Field>
-                  ) : (
-                    <>
-                      <Field label="Proyecto" id="agent-repository">
-                        <Select
-                          value={repository}
-                          onValueChange={setRepository}
-                        >
-                          <SelectTrigger
-                            id="agent-repository"
-                            className="w-full"
-                          >
-                            <SelectValue placeholder="Selecciona un proyecto" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {selected?.repositories.map((r) => (
-                              <SelectItem key={r.id} value={r.id}>
-                                {r.name}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      </Field>
-                      <Field label="Agente de IA" id="agent-provider">
-                        <Select value={provider} onValueChange={setProvider}>
-                          <SelectTrigger id="agent-provider" className="w-full">
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="codex">Codex</SelectItem>
-                            <SelectItem value="claude">Claude Code</SelectItem>
-                          </SelectContent>
-                        </Select>
-                      </Field>
-                    </>
-                  )}
-                </>
-              )}
-            </>
-          )}
+                    <Field label="Agente de IA" id="agent-provider">
+                      <Select value={provider} onValueChange={setProvider}>
+                        <SelectTrigger id="agent-provider" className="w-full">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="codex">Codex</SelectItem>
+                          <SelectItem value="claude">Claude Code</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </Field>
+                  </>
+                )}
+              </>
+            )}
+          </>
           {error && (
             <p role="alert" className="text-sm text-destructive">
               {error}
@@ -784,8 +779,7 @@ function CreateDialog({
             className="w-full"
             disabled={
               busy ||
-              (!machine &&
-                mode !== "mcp" &&
+              (mode !== "mcp" &&
                 (!machineId ||
                   !repository ||
                   (mode === "existing" && !worktree)))
@@ -793,11 +787,9 @@ function CreateDialog({
           >
             {busy
               ? "Preparando…"
-              : machine
-                ? "Continuar"
-                : mode === "new"
-                  ? "Crear agente"
-                  : "Compartir agente"}
+              : mode === "new"
+                ? "Crear agente"
+                : "Compartir agente"}
           </Button>
         </form>
       </DialogContent>
@@ -822,22 +814,18 @@ function Field({
 }
 function ConnectionDialog({
   token,
-  machine,
   onClose,
 }: {
   token: string;
-  machine: boolean;
   onClose: () => void;
 }) {
   const url = `${window.location.origin}/api/mcp`;
   const config = JSON.stringify(
-    machine
-      ? { url, token }
-      : {
-          mcpServers: {
-            slak: { url, headers: { Authorization: `Bearer ${token}` } },
-          },
-        },
+    {
+      mcpServers: {
+        slak: { url, headers: { Authorization: `Bearer ${token}` } },
+      },
+    },
     null,
     2,
   );
@@ -847,7 +835,7 @@ function ConnectionDialog({
     );
     const a = document.createElement("a");
     a.href = url;
-    a.download = machine ? "slak-machine.json" : "slak-mcp.json";
+    a.download = "slak-mcp.json";
     a.click();
     setTimeout(() => URL.revokeObjectURL(url), 1000);
   }
@@ -855,38 +843,17 @@ function ConnectionDialog({
     <Dialog open onOpenChange={(v) => !v && onClose()}>
       <DialogContent className="max-h-[90dvh] overflow-auto sm:max-w-xl">
         <DialogHeader>
-          <DialogTitle>
-            {machine ? "Conecta el puente de Orca" : "Conexión MCP del agente"}
-          </DialogTitle>
+          <DialogTitle>Conexión MCP del agente</DialogTitle>
           <DialogDescription>
             Guarda esta configuración. El token solo se muestra ahora y permite
             actuar con esta identidad.
           </DialogDescription>
         </DialogHeader>
-        {machine ? (
-          <div className="space-y-3 text-sm">
-            <p>
-              En la máquina que ejecuta Orca, abre una copia de este
-              repositorio, instala sus dependencias y descarga la configuración.
-            </p>
-            <p>Comparte todos tus proyectos y sesiones de Orca con:</p>
-            <pre className="overflow-auto rounded-lg bg-muted p-3 text-xs">
-              npm run orca:bridge -- --config ./slak-machine.json --share-all
-            </pre>
-            <p className="text-muted-foreground">
-              Para compartir solo un proyecto, sustituye{" "}
-              <code>--share-all</code> por <code>--repo id:ID</code>. Consulta
-              los IDs con <code>orca repo list</code>. Mantén el puente abierto
-              mientras compartes tu máquina.
-            </p>
-          </div>
-        ) : (
-          <p className="text-sm text-muted-foreground">
-            Añade esta configuración a tu cliente MCP. Usa heartbeat,
-            list_tasks, claim_task, task_context y finish_task para recibir
-            trabajo y responder.
-          </p>
-        )}
+        <p className="text-sm text-muted-foreground">
+          Añade esta configuración a tu cliente MCP. Usa heartbeat, list_tasks,
+          claim_task, task_context y finish_task para recibir trabajo y
+          responder.
+        </p>
         <pre className="max-h-56 overflow-auto rounded-lg border bg-muted p-3 text-xs">
           {config}
         </pre>

@@ -2,7 +2,7 @@
 /** Run this bridge on the same host as Orca and the shared worktrees. */
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { readFile, writeFile, mkdir, rm, rename } from "node:fs/promises";
+import { readFile, writeFile, mkdir, rm, rename, realpath } from "node:fs/promises";
 import { createWorkBridge } from "./orca-work.mjs";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -264,6 +264,7 @@ async function main() {
     }
     return;
   }
+  if (!values.repo.length && Array.isArray(config.repos)) values.repo = config.repos;
   if (!values["share-all"] && !values.repo.length)
     throw new Error("Elige qué compartir con --repo id:ID o --share-all.");
   const statePath = `${configPath}.state.json`,
@@ -325,6 +326,7 @@ async function main() {
   process.on("SIGTERM", () => {
     stopped = true;
   });
+  let announced = false;
   let catalog,
     lastDiscovery = 0;
   try {
@@ -344,6 +346,10 @@ async function main() {
           throw new Error(
             "Usa la configuración de una máquina compartida, no la de un agente externo.",
           );
+        if (!announced) {
+          console.log("Máquina conectada a Slak. Ya puedes volver a la app.");
+          announced = true;
+        }
         const { commands } = await call(client, "list_commands");
         // Commands first, so a stop fences work before another prompt can be dispatched.
         for (const entry of commands) {
@@ -471,7 +477,7 @@ async function main() {
     await rm(lockPath, { recursive: true, force: true });
   }
 }
-if (process.argv[1] && resolve(process.argv[1]) === script)
+if (process.argv[1] && (await realpath(resolve(process.argv[1]))) === script)
   main().catch((error) => {
     console.error(error.message);
     process.exitCode = 1;

@@ -85,19 +85,21 @@ una identidad estable, no un proceso ni un worktree. Cada mención principal abr
 un **hilo de trabajo** con un orquestador y contexto propios. Responder dentro de
 ese hilo continúa el trabajo; no crea otro workspace por mensaje.
 
-1. En **Máquinas compartidas → Conectar mi Orca**, descarga `slak-machine.json`.
-2. Ejecuta en la **misma máquina que Orca**:
+1. En **Máquinas compartidas → Conectar mi Orca**, pulsa **Copiar comando**.
+2. Pégalo en una terminal de la **misma máquina que Orca** y elige los proyectos
+   por su nombre en la lista. El instalador detecta el nombre de la máquina,
+   instala el puente y guarda su configuración automáticamente. No necesitas
+   descargar un JSON, clonar Slak ni buscar IDs. La app confirma la conexión
+   cuando recibe el primer heartbeat real.
 
-   ```bash
-   npm install
-   orca repo list --json
-   npm run orca:bridge -- --config ./slak-machine.json --repo id:ID_DEL_PROYECTO
-   ```
-
-   Puedes repetir `--repo` o usar `--share-all`. `--worktree path:/ruta` limita el
-   acceso a worktrees concretos e impide crear otros. Requiere Node 20+, Orca y
-   Codex o Claude Code autenticados. El puente conecta hacia Slak; no abre puertos.
-   Para conectar otra máquina, usa una URL HTTPS de Slak accesible desde ella.
+   Requiere macOS/Linux, Node 20+ con npm, `curl`, Orca abierto con su CLI instalado
+   y Codex o Claude Code autenticados. Mantén esa terminal abierta mientras
+   compartes; `Ctrl+C` detiene el puente. El instalador deja un archivo
+   `~/.slak/machines/<id>/conectar.command` para volver a arrancarlo sin repetir
+   el alta. La configuración, los recibos y las credenciales tienen permisos
+   privados. El comando de alta es personal, de un solo uso y caduca a los
+   15 minutos; el token permanente nunca aparece en él. Para otra máquina, usa
+   una URL HTTPS de Slak accesible desde ella. El puente no abre puertos.
 
 3. En **Agentes del equipo**, crea un **bot orquestador** y elige máquina y
    proyecto. Un agente de terminal existente tiene **Activar orquestador** para
@@ -117,6 +119,18 @@ ese hilo continúa el trabajo; no crea otro workspace por mensaje.
    generación conservando hilo, memoria y eventos. Detener el bot detiene sus
    sesiones compartidas; el worktree no se borra. Desconectar la máquina revoca el
    puente y deja los procesos locales tal como están.
+
+### Conexión manual avanzada
+
+Las configuraciones anteriores siguen funcionando:
+
+```bash
+npm run orca:bridge -- --config ./slak-machine.json --repo id:ID_DEL_PROYECTO
+```
+
+Puedes repetir `--repo` o usar `--share-all`. `--worktree path:/ruta` limita el
+acceso a worktrees concretos e impide crear otros. El instalador guarda la
+selección de proyectos en la configuración para no tener que repetir argumentos.
 
 ### Contexto y recuperación
 
@@ -211,6 +225,7 @@ Pruebas de concurrencia y aislamiento MCP contra una base de pruebas independien
 
 ```bash
 SLAK_TEST_DATABASE=1 DATABASE_URL=postgres://.../slak_work_checks npx tsx --test tests/work.test.ts
+SLAK_TEST_DATABASE=1 DATABASE_URL=postgres://...@127.0.0.1:54329/slak npx tsx --test tests/machine-pairing.test.ts
 ```
 
 Regresión del registro durante una migración pendiente (Postgres local con permiso

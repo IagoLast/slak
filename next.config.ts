@@ -1,7 +1,13 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  /* config options here */
+  outputFileTracingIncludes: {
+    "/api/machines/install": [
+      "./scripts/install-machine.sh",
+      "./scripts/setup-machine.mjs",
+      "./scripts/orca-*.mjs",
+    ],
+  },
 };
 
 export default nextConfig;

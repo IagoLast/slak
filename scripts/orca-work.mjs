@@ -1,5 +1,5 @@
 import { createHmac } from "node:crypto";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile, realpath } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
@@ -546,7 +546,7 @@ async function main() {
     await client.close();
   }
 }
-if (process.argv[1] && resolve(process.argv[1]) === script)
+if (process.argv[1] && (await realpath(resolve(process.argv[1]))) === script)
   main().catch((e) => {
     console.error(e.message);
     process.exitCode = 1;

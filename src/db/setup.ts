@@ -159,6 +159,11 @@ const STATEMENTS = [
     created_at timestamptz NOT NULL DEFAULT now()
   )`,
   sql`CREATE INDEX IF NOT EXISTS work_actions_pending ON work_actions(session_id, status)`,
+  sql`CREATE TABLE IF NOT EXISTS machine_pairings (
+    id text PRIMARY KEY, owner_id text NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    machine_id text REFERENCES machines(id) ON DELETE CASCADE, token_hash text NOT NULL UNIQUE,
+    expires_at timestamptz NOT NULL, consumed_at timestamptz
+  )`,
 ];
 
 const SCHEMA_VERSION = STATEMENTS.length;

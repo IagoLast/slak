@@ -1,7 +1,7 @@
-import { eq } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 import { NextResponse } from "next/server";
 import { db } from "@/db";
-import { machines } from "@/db/schema";
+import { machinePairings, machines } from "@/db/schema";
 import { newAgentToken } from "@/lib/agents";
 import { getSessionUser } from "@/lib/session";
 async function change(req: Request, params: Promise<{ id: string }>) {
@@ -18,10 +18,20 @@ async function change(req: Request, params: Promise<{ id: string }>) {
     req.method === "DELETE"
       ? { token: null, tokenHash: null }
       : newAgentToken();
-  await db
-    .update(machines)
-    .set({ tokenHash: next.tokenHash, lastSeenAt: null })
-    .where(eq(machines.id, id));
+  await db.transaction(async (tx) => {
+    await tx
+      .delete(machinePairings)
+      .where(
+        and(
+          eq(machinePairings.machineId, id),
+          isNull(machinePairings.consumedAt),
+        ),
+      );
+    await tx
+      .update(machines)
+      .set({ tokenHash: next.tokenHash, lastSeenAt: null })
+      .where(eq(machines.id, id));
+  });
   return NextResponse.json(
     { token: next.token },
     { headers: { "Cache-Control": "no-store" } },

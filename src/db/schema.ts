@@ -258,6 +258,15 @@ export const machines = pgTable("machines", {
     .defaultNow(),
 });
 
+export const machinePairings = pgTable("machine_pairings", {
+  id: text("id").primaryKey(),
+  ownerId: text("owner_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  machineId: text("machine_id").references(() => machines.id, { onDelete: "cascade" }),
+  tokenHash: text("token_hash").notNull().unique(),
+  expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+  consumedAt: timestamp("consumed_at", { withTimezone: true }),
+});
+
 export const machineCommands = pgTable("machine_commands", {
   id: text("id").primaryKey(),
   machineId: text("machine_id")
