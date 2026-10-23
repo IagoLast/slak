@@ -10,7 +10,7 @@ import {
   contextUsage,
   turnCompletion,
 } from "./orca-native.mjs";
-import { terminalTranscriptBatches } from "./orca-transcript.mjs";
+import { archivedTerminalSource, terminalTranscriptBatches } from "./orca-transcript.mjs";
 
 const script = fileURLToPath(import.meta.url);
 const quote = (s) => `'${s.replaceAll("'", "'\\''")}'`;
@@ -345,17 +345,22 @@ export function createWorkBridge({
           if (
             (worktrees.length && !worktrees.includes(worktree)) ||
             !catalog.worktrees?.some((tree) => tree.worktree === worktree && tree.repository === thread.repository)
-          ) return;
-          const terminal = catalog.sessions?.find((terminal) =>
-            terminal.worktree === worktree && terminal.runtimeHandle === bot.runtimeHandle,
-          );
-          if (!terminal) return;
+          ) throw new Error("Este worktree ya no está compartido por el puente.");
           const { tabs = [] } = await native.call("session.tabs.list", { worktree });
-          const tab = tabs.find((tab) => tab.type === "terminal" && tab.terminal === terminal.runtimeHandle);
-          const providerSession = tab?.agentStatus?.providerSession;
-          if (!providerSession?.transcriptPath)
-            throw new Error("Orca todavía no ha identificado el historial de esta sesión.");
-          const status = tab.agentStatus.state;
+          const tab = tabs.find((tab) => tab.type === "terminal" && tab.terminal === bot.runtimeHandle);
+          let providerSession = tab?.agentStatus?.providerSession;
+          if (!providerSession?.transcriptPath && store.terminalSource?.handle === bot.runtimeHandle)
+            providerSession = store.terminalSource.providerSession;
+          if (!providerSession?.transcriptPath) {
+            const { terminal } = await native.call("terminal.show", { terminal: bot.runtimeHandle });
+            const { sessions = [] } = await native.call("aiVault.listSessions", {
+              scopePaths: [worktree.replace(/^path:/, "")], limit: 2000,
+            });
+            providerSession = archivedTerminalSource(sessions, terminal, provider, worktree);
+          }
+          store.terminalSource = { handle: bot.runtimeHandle, providerSession };
+          await save();
+          const status = tab?.agentStatus?.state;
           for await (const batch of terminalTranscriptBatches(providerSession, provider, session.generation, store.transcript)) {
             await call(client, "work_sync", {
               sessionId: session.id,

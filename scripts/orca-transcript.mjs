@@ -1,6 +1,22 @@
 import { createHash } from "node:crypto";
 import { open } from "node:fs/promises";
 
+export function archivedTerminalSource(sessions, terminal, provider, worktree) {
+  const path = worktree.replace(/^path:/, "");
+  if (terminal.worktreePath !== path ||
+      (terminal.executionHostId && terminal.executionHostId !== "local"))
+    throw new Error("El terminal ya no pertenece a este worktree local.");
+  const title = terminal.title?.split(" | ")[0].trim();
+  const matches = title ? sessions.filter((session) =>
+    session.cwd === path && session.agent === provider &&
+    (!session.executionHostId || session.executionHostId === "local") &&
+    !session.subagent && session.title === title,
+  ) : [];
+  if (matches.length !== 1 || !matches[0].sessionId || !matches[0].filePath)
+    throw new Error("La sesión está cerrada y Orca no ha podido identificar su historial guardado.");
+  return { id: matches[0].sessionId, transcriptPath: matches[0].filePath };
+}
+
 // Only conversation text leaves the machine. Provider metadata, reasoning,
 // system instructions, tool calls and tool results are never published.
 export function transcriptMessage(record, provider) {

@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { mkdtemp, writeFile, appendFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { terminalTranscriptBatches, transcriptMessage } from "../scripts/orca-transcript.mjs";
+import { archivedTerminalSource, terminalTranscriptBatches, transcriptMessage } from "../scripts/orca-transcript.mjs";
 import { createWorkBridge } from "../scripts/orca-work.mjs";
 
 const timestamp = "2026-10-23T14:00:00.000Z";
@@ -45,7 +45,7 @@ test("the bridge imports the selected shared terminal and retains its history cu
   const transcriptPath = join(dir, "session.jsonl");
   try {
     await writeFile(transcriptPath, JSON.stringify(message("user", "Ya estaba en Orca")) + "\n");
-    const events = [], state = {};
+    const events = [], errors = [], state = {};
     const tick = createWorkBridge({
       config: {}, state, save: async () => {},
       call: async (_client, method, args) => {
@@ -53,7 +53,7 @@ test("the bridge imports the selected shared terminal and retains its history cu
           sessions: [{ session: { id: "session", generation: 1, state: "idle", worktree: "path:/repo/work" }, thread: { repository: "id:repo" }, bot: { mode: "session", provider: "codex", runtimeHandle: "term_one" } }], turns: [], actions: [],
         };
         assert.equal(method, "work_sync");
-        assert.equal(args.error, null);
+        if (args.error) errors.push(args.error);
         events.push(...args.events);
       },
       runtimeLoader: async () => ({ call: async (method, args) => {
@@ -68,5 +68,15 @@ test("the bridge imports the selected shared terminal and retains its history cu
     await tick({}, { ...catalog, worktrees: [] });
     assert.equal(events.length, 1);
     assert.equal(events[0].body.blocks[0].text, "Ya estaba en Orca");
+    assert.match(errors[0], /ya no está compartido/);
   } finally { await rm(dir, { recursive: true, force: true }); }
+});
+
+test("a closed terminal resolves only its own unambiguous saved conversation", () => {
+  const terminal = { worktreePath: "/repo/work", title: "Actualizar React | work", executionHostId: "local" };
+  const session = { cwd: "/repo/work", title: "Actualizar React", agent: "codex", sessionId: "saved", filePath: "/saved.jsonl", executionHostId: "local" };
+  const sessions = [session, { ...session, cwd: "/private" }, { ...session, title: "Otra conversación" }, { ...session, subagent: {} }];
+  assert.deepEqual(archivedTerminalSource(sessions, terminal, "codex", "path:/repo/work"), { id: "saved", transcriptPath: "/saved.jsonl" });
+  assert.throws(() => archivedTerminalSource([...sessions, { ...session, sessionId: "other" }], terminal, "codex", "path:/repo/work"), /no ha podido identificar/);
+  assert.throws(() => archivedTerminalSource(sessions, terminal, "codex", "path:/private"), /no pertenece/);
 });

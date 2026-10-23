@@ -418,12 +418,16 @@ export default function WorkConversation({
                 <div className="py-16 text-center">
                   <Bot className="mx-auto mb-3 size-8 text-muted-foreground" />
                   <p className="font-medium">
-                    {!session.lastSeenAt
-                      ? "Cargando mensajes de Orca…"
+                    {session.error
+                      ? "No se pudo recuperar el historial"
+                      : !session.lastSeenAt
+                      ? online ? "Cargando mensajes de Orca…" : "Historial pendiente de sincronizar"
                       : "Todavía no hay mensajes en esta vista"}
                   </p>
                   <p className="mt-2 text-sm text-muted-foreground">
-                    {!session.lastSeenAt
+                    {session.error
+                      ? "El motivo aparece debajo. El puente volverá a intentarlo."
+                      : !session.lastSeenAt
                       ? online
                         ? "El puente está recuperando la conversación existente."
                         : "Conecta la máquina para recuperar la conversación."
