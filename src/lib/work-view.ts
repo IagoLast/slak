@@ -48,6 +48,7 @@ export function visibleWorkEvents(events: WorkEvent[], view: ConversationView) {
     if (body.kind !== "message" || body.agentId || !hasText(body)) return false;
     if (body.role === "user") return true;
     if (view === "messages") return true;
+    if (body.source === "orca-terminal" && body.phase === "commentary") return false;
     // Old events without turn metadata remain readable; do not guess which
     // text was a final response from timestamps or the message's wording.
     if (typeof body.turnId !== "string") return true;

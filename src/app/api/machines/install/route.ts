@@ -13,7 +13,7 @@ export async function GET(req: Request) {
     "X-Content-Type-Options": "nosniff",
   };
   if (file === "bundle") {
-    const names = ["orca-bridge.mjs", "orca-work.mjs", "orca-native.mjs"];
+    const names = ["orca-bridge.mjs", "orca-work.mjs", "orca-native.mjs", "orca-transcript.mjs"];
     const entries = await Promise.all(
       names.map(async (name) => [
         name,

@@ -225,39 +225,42 @@ export default function WorkConversation({
   const lastFailure = data.actions.find((a) => a.status === "failed");
   return (
     <div className="flex h-full min-h-0 flex-1 flex-col bg-background">
-      <header className="flex items-start gap-2 border-b px-4 py-3 sm:gap-3 sm:px-5">
-        <div className="mt-0.5 rounded-lg bg-primary/10 p-2 text-primary">
-          <MessageSquare className="size-5" />
-        </div>
-        <div className="min-w-0 flex-1">
-          <h1 className="truncate font-semibold tracking-tight">
-            {embedded
-              ? session.name
-              : data.workspace?.name ||
-                (worktree ? worktreeName(worktree) : data.thread.title)}
-          </h1>
-          <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-            {!embedded && (
-              <>
-                <span>{session.name}</span>
-                <span>·</span>
-                <span className="inline-flex items-center gap-1">
-                  <Server className="size-3" />
-                  {data.bot.machine}
-                </span>
-              </>
-            )}
-            <Badge
-              variant={session.state === "error" ? "destructive" : "secondary"}
-            >
-              {session.closedAt
-                ? "Worktree cerrado"
-                : online
-                  ? workStateLabels[session.state]
-                  : "Sin conexión"}
-            </Badge>
-          </div>
-        </div>
+      <header className="flex flex-wrap items-center gap-2 border-b px-4 py-2 sm:px-5">
+        {!embedded && (
+          <>
+            <MessageSquare className="size-5 shrink-0 text-primary" />
+            <div className="min-w-0 flex-1">
+              <h1 className="truncate font-semibold tracking-tight">
+                {data.workspace?.name ||
+                  (worktree ? worktreeName(worktree) : data.thread.title)}
+              </h1>
+              <p className="flex items-center gap-1 text-xs text-muted-foreground">
+                {session.name} · <Server className="size-3" /> {data.bot.machine}
+              </p>
+            </div>
+          </>
+        )}
+        <Badge variant={session.state === "error" ? "destructive" : "secondary"}>
+          {session.closedAt
+            ? "Worktree cerrado"
+            : online ? workStateLabels[session.state] : "Sin conexión"}
+        </Badge>
+        <Select value={view} onValueChange={setView}>
+          <SelectTrigger
+            className="ml-auto"
+            size="sm"
+            aria-label="Vista de la conversación"
+          >
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent align="end">
+            {conversationViews.map((option) => (
+              <SelectItem key={option.value} value={option.value}>
+                {option.label}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
         {data.canManage && ["running", "waiting"].includes(session.state) && (
           <Button
             variant="outline"
@@ -299,19 +302,6 @@ export default function WorkConversation({
             Reanudar
           </Button>
         )}
-        {!compact && data.canCloseWorktree && (
-          <Button
-            variant="outline"
-            size="sm"
-            className="hidden sm:inline-flex"
-            disabled={busy || !!activeAction || !online}
-            onClick={() => setCloseOpen(true)}
-          >
-            <Archive className="size-4" />
-            <span className="hidden sm:inline">Cerrar worktree</span>
-            <span className="sr-only sm:hidden">Cerrar worktree</span>
-          </Button>
-        )}
         {compact && (
           <Button
             variant="ghost"
@@ -337,7 +327,6 @@ export default function WorkConversation({
           <DropdownMenuContent align="end">
             {data.canCloseWorktree && (
               <DropdownMenuItem
-                className="sm:hidden"
                 disabled={busy || !!activeAction || !online}
                 onSelect={() => setCloseOpen(true)}
               >
@@ -395,33 +384,6 @@ export default function WorkConversation({
       </header>
       <div className="flex min-h-0 flex-1">
         <main className="flex min-h-0 min-w-0 flex-1 flex-col">
-          <div className="flex flex-wrap items-center gap-2 border-b px-5 py-2.5 text-xs">
-            <span className="flex items-center gap-2">
-              <MessageSquare className="size-3.5" />
-              Conversación
-            </span>
-            <Select value={view} onValueChange={setView}>
-              <SelectTrigger
-                className="ml-auto"
-                size="sm"
-                aria-label="Vista de la conversación"
-              >
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent align="end">
-                {conversationViews.map((option) => (
-                  <SelectItem key={option.value} value={option.value}>
-                    {option.label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            {!online && !session.closedAt && (
-              <span className="ml-auto text-muted-foreground">
-                Se enviará cuando vuelva la máquina
-              </span>
-            )}
-          </div>
           {session.closedAt && (
             <div
               role="status"
@@ -456,11 +418,16 @@ export default function WorkConversation({
                 <div className="py-16 text-center">
                   <Bot className="mx-auto mb-3 size-8 text-muted-foreground" />
                   <p className="font-medium">
-                    El trabajo empieza con una conversación
+                    {!session.lastSeenAt
+                      ? "Cargando mensajes de Orca…"
+                      : "Todavía no hay mensajes en esta vista"}
                   </p>
                   <p className="mt-2 text-sm text-muted-foreground">
-                    Comparte contexto con {session.name.toLowerCase()}. El
-                    equipo verá sus respuestas y herramientas aquí.
+                    {!session.lastSeenAt
+                      ? online
+                        ? "El puente está recuperando la conversación existente."
+                        : "Conecta la máquina para recuperar la conversación."
+                      : "Puedes escribir a la sesión o cambiar la vista para ver su actividad."}
                   </p>
                 </div>
               )}

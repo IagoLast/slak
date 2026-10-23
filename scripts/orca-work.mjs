@@ -10,6 +10,7 @@ import {
   contextUsage,
   turnCompletion,
 } from "./orca-native.mjs";
+import { terminalTranscriptBatches } from "./orca-transcript.mjs";
 
 const script = fileURLToPath(import.meta.url);
 const quote = (s) => `'${s.replaceAll("'", "'\\''")}'`;
@@ -142,7 +143,7 @@ export function createWorkBridge({
     // turn produced more than one page while Slak was offline.
     const pages = [tail];
     let nextCursor = tail.liveCursor;
-    if (store.cursor && store.cursor.epoch === tail.epoch) {
+    if (store.historyVersion === 2 && store.cursor && store.cursor.epoch === tail.epoch) {
       let cursor = store.cursor;
       for (let n = 0; n < 30; n++) {
         const result = await native.call("agentSession.history", {
@@ -160,7 +161,7 @@ export function createWorkBridge({
         if (!result.page.hasNewer) break;
         cursor = result.page.window.nextCursor;
       }
-    } else if (!store.cursor && tail.hasOlder) {
+    } else if (tail.hasOlder) {
       let page = tail;
       while (page.hasOlder) {
         page = (
@@ -189,7 +190,7 @@ export function createWorkBridge({
           store.userItemIds.push(submission.providerItemId);
       }
       const events = publicEvents(page.items, entry.session.generation, {
-        includeUserMessages: !!entry.session.imported,
+        includeUserMessages: true,
         excludedUserItemIds: [
           ...store.userItemIds,
           ...(store.sentMessageIds ?? []).map((id) => `orca:${id}`),
@@ -199,7 +200,7 @@ export function createWorkBridge({
       let bytes = 0;
       for (const event of events) {
         const size = Buffer.byteLength(JSON.stringify(event));
-        if (bytes + size > 1_000_000) {
+        if (bytes + size > 1_000_000 || batches.at(-1).length >= 200) {
           batches.push([]);
           bytes = 0;
         }
@@ -220,6 +221,7 @@ export function createWorkBridge({
         });
     }
     store.cursor = nextCursor;
+    store.historyVersion = 2;
     await save();
     return tail;
   }
@@ -321,7 +323,6 @@ export function createWorkBridge({
     }
     async function processEntry(entry) {
       const { session, thread, bot } = entry;
-      if (bot.mode === "session") return;
       if (
         session.closedAt ||
         closing.has(
@@ -335,10 +336,39 @@ export function createWorkBridge({
       const turns = inbox.turns.filter((t) => t.sessionId === session.id);
       const actions = inbox.actions.filter((a) => a.sessionId === session.id);
       if (session.state === "stopped" && !actions.length) return;
-      if (!turns.length && !actions.length && !session.runtimeId) return;
+      if (bot.mode !== "session" && !turns.length && !actions.length && !session.runtimeId) return;
       const key = `${session.id}:${session.generation}`;
       const store = (state.work[key] ??= {});
       try {
+        if (bot.mode === "session") {
+          const worktree = session.worktree || thread.worktree;
+          if (
+            (worktrees.length && !worktrees.includes(worktree)) ||
+            !catalog.worktrees?.some((tree) => tree.worktree === worktree && tree.repository === thread.repository)
+          ) return;
+          const terminal = catalog.sessions?.find((terminal) =>
+            terminal.worktree === worktree && terminal.runtimeHandle === bot.runtimeHandle,
+          );
+          if (!terminal) return;
+          const { tabs = [] } = await native.call("session.tabs.list", { worktree });
+          const tab = tabs.find((tab) => tab.type === "terminal" && tab.terminal === terminal.runtimeHandle);
+          const providerSession = tab?.agentStatus?.providerSession;
+          if (!providerSession?.transcriptPath)
+            throw new Error("Orca todavía no ha identificado el historial de esta sesión.");
+          const status = tab.agentStatus.state;
+          for await (const batch of terminalTranscriptBatches(providerSession, provider, session.generation, store.transcript)) {
+            await call(client, "work_sync", {
+              sessionId: session.id,
+              generation: session.generation,
+              state: status === "working" ? "running" : status === "waiting" ? "waiting" : "idle",
+              error: null,
+              events: batch.events,
+            });
+            store.transcript = batch.cursor;
+            await save();
+          }
+          return;
+        }
         if (
           !session.runtimeId &&
           !store.created &&

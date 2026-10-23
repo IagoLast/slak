@@ -167,6 +167,7 @@ export function registerWorkTools(server: McpServer, principal: WorkPrincipal) {
             id: agents.id,
             mode: agents.mode,
             handle: agents.handle,
+            runtimeHandle: agents.runtimeHandle,
             provider: agents.provider,
             state: agents.state,
             description: agents.description,

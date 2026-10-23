@@ -130,8 +130,10 @@ Puedes repetir `--repo`, usar `--share-all` o limitar los worktrees con
   define `SLAK_ORCA_RUNTIME=/ruta/a/out/cli/runtime/client.js`.
 - Los envíos tienen recibos persistentes para no duplicar mensajes tras reconectar.
   Los eventos se sincronizan por item, revisión y cursor.
-- Las sesiones de terminal anteriores conservan su adaptador y sus nuevas respuestas
-  llegan a Slak; su historial anterior y los controles de turno siguen en Orca.
+- Las sesiones de terminal sincronizan también los mensajes anteriores de Codex y
+  Claude desde el transcript que Orca identifica para ese terminal. Solo se publican
+  mensajes de usuario y asistente; los controles de turno siguen en Orca.
+  Actualiza y reinicia el puente para incorporar este historial.
 - La base conserva los identificadores y registros anteriores por compatibilidad.
   Los canales internos de las sesiones no aparecen como canales de Slack.
 - El endpoint `/api/mcp` mantiene el transporte autenticado del puente. Las

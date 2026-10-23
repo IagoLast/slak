@@ -8,7 +8,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { createInterface } from "node:readline/promises";
 
 const exec = promisify(execFile);
-const files = ["orca-bridge.mjs", "orca-work.mjs", "orca-native.mjs"];
+const files = ["orca-bridge.mjs", "orca-work.mjs", "orca-native.mjs", "orca-transcript.mjs"];
 const quote = (value) => `'${value.replaceAll("'", "'\\''")}'`;
 
 export function slakOrigin(value) {
