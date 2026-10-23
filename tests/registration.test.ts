@@ -88,3 +88,26 @@ test("forced setup repairs drift even when schema readiness was already cached",
   assert.equal(users.length, 2);
   assert.ok(users.every((user) => user.kind === "human"));
 });
+
+test("an invitation can only be consumed once by concurrent registrations", async () => {
+  await connection`INSERT INTO invites (token, role) VALUES ('single-use-invite', 'member')`;
+  const responses = await Promise.all([
+    register(request("concurrent-a@test.invalid", "single-use-invite")),
+    register(request("concurrent-b@test.invalid", "single-use-invite")),
+  ]);
+  assert.deepEqual(responses.map((r) => r.status).sort(), [200, 400]);
+  const accounts = await connection`SELECT id FROM users WHERE email IN ('concurrent-a@test.invalid', 'concurrent-b@test.invalid')`;
+  assert.equal(accounts.length, 1);
+});
+
+test("an email-restricted guest invite grants only its selected channels", async () => {
+  const [general] = await connection`SELECT id FROM channels WHERE name = 'general'`;
+  await connection`INSERT INTO invites (token, email, role, channel_ids)
+    VALUES ('guest-invite', 'guest@test.invalid', 'guest', ${connection.json([general.id])})`;
+  assert.equal((await register(request("wrong@test.invalid", "guest-invite"))).status, 400);
+  assert.equal((await register(request("guest@test.invalid", "guest-invite"))).status, 200);
+  const [guest] = await connection`SELECT id, role FROM users WHERE email = 'guest@test.invalid'`;
+  assert.equal(guest.role, "guest");
+  const memberships = await connection`SELECT channel_id FROM channel_members WHERE user_id = ${guest.id}`;
+  assert.deepEqual(memberships.map((m) => m.channel_id), [general.id]);
+});

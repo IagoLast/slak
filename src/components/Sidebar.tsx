@@ -98,6 +98,7 @@ export default function Sidebar({
   );
   const [deleting, setDeleting] = useState<SummaryChannel | null>(null);
   const [busy, setBusy] = useState(false);
+  const userRole = data?.user.role ?? currentUser.role;
   const prevUnread = useRef<Map<string, number>>(new Map());
   useEffect(() => {
     if (!data) return;
@@ -188,6 +189,19 @@ export default function Sidebar({
           <Bell />
         </Button>
       </div>
+      {userRole === "admin" && (
+        <div className="border-b p-3">
+          <Button asChild variant="outline" className="w-full justify-start">
+            <Link
+              href="/invites"
+              onClick={onNavigate}
+              aria-current={pathname === "/invites" ? "page" : undefined}
+            >
+              <UserPlus /> Invitar personas
+            </Link>
+          </Button>
+        </div>
+      )}
       <nav
         className="flex-1 space-y-5 overflow-y-auto p-3"
         aria-label="Navegación principal"
@@ -225,11 +239,7 @@ export default function Sidebar({
         <div>
           <SectionHeader
             label="Canales"
-            onAdd={
-              currentUser.role !== "guest"
-                ? () => setModal("channel")
-                : undefined
-            }
+            onAdd={userRole !== "guest" ? () => setModal("channel") : undefined}
           />
           {error && (
             <p role="alert" className="p-2 text-xs text-destructive">
@@ -301,15 +311,6 @@ export default function Sidebar({
             ))}
           </ul>
         </div>
-        {currentUser.role === "admin" && (
-          <NavLink
-            href="/invites"
-            active={pathname === "/invites"}
-            onClick={onNavigate}
-          >
-            <UserPlus /> Invitar personas
-          </NavLink>
-        )}
       </nav>
       <div className="flex items-center gap-3 border-t p-4">
         <Avatar>
@@ -320,7 +321,11 @@ export default function Sidebar({
         <div className="min-w-0 flex-1">
           <p className="truncate text-sm font-medium">{currentUser.name}</p>
           <p className="text-xs text-muted-foreground">
-            {currentUser.role === "guest" ? "Invitado" : "Miembro del equipo"}
+            {userRole === "admin"
+              ? "Administrador"
+              : userRole === "guest"
+                ? "Invitado"
+                : "Miembro del equipo"}
           </p>
         </div>
         <Button

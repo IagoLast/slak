@@ -31,8 +31,12 @@ Chat de empresa sencillo, estilo Slack, pensado para desplegarse en Vercel.
    idempotente; también puedes usar `npm run db:push` en local si lo prefieres).
 6. Abre la app, entra en **/register** y crea tu cuenta: el primer usuario es
    administrador y se crea el canal `#general` automáticamente.
-7. Desde **Invitar personas** (barra lateral) genera enlaces para el resto del
-   equipo o para invitados externos.
+7. Desde **Invitar personas**, bajo el nombre del workspace en la barra lateral,
+   genera enlaces para el resto del equipo o para invitados externos. Esta opción
+   requiere el rol de administrador. Indica un email si quieres restringir quién
+   puede usar el enlace y elige los canales iniciales (`#general` viene seleccionado).
+   Copia y comparte el enlace: no se envía email automáticamente. Cada enlace permite
+   crear una sola cuenta; puedes revocarlo mientras siga pendiente.
 
 ## Desarrollo local
 

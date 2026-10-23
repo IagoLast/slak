@@ -22,7 +22,10 @@ export async function POST(req: Request) {
 
   if (!name || !email || password.length < 8) {
     return NextResponse.json(
-      { error: "Nombre, email y contraseña (mínimo 8 caracteres) son obligatorios." },
+      {
+        error:
+          "Nombre, email y contraseña (mínimo 8 caracteres) son obligatorios.",
+      },
       { status: 400 },
     );
   }
@@ -30,9 +33,15 @@ export async function POST(req: Request) {
   try {
     await ensureSchema();
   } catch (error) {
-    console.error("No se pudo preparar la base de datos para el registro:", error);
+    console.error(
+      "No se pudo preparar la base de datos para el registro:",
+      error,
+    );
     return NextResponse.json(
-      { error: "No se pudo preparar el registro. Inténtalo de nuevo en unos segundos." },
+      {
+        error:
+          "No se pudo preparar el registro. Inténtalo de nuevo en unos segundos.",
+      },
       { status: 503 },
     );
   }
@@ -51,43 +60,45 @@ export async function POST(req: Request) {
   const userId = nanoid();
 
   if (token) {
-    const invite = await db.query.invites.findFirst({
-      where: eq(invites.token, token),
-    });
-    if (!invite || invite.usedAt) {
-      return NextResponse.json(
-        { error: "La invitación no es válida o ya se ha usado." },
-        { status: 400 },
-      );
-    }
-    if (invite.email && invite.email.toLowerCase() !== email) {
-      return NextResponse.json(
-        { error: "Esta invitación es para otro email." },
-        { status: 400 },
-      );
-    }
+    return db.transaction(async (tx) => {
+      const [invite] = await tx
+        .select()
+        .from(invites)
+        .where(eq(invites.token, token))
+        .for("update");
+      if (!invite || invite.usedAt) {
+        return NextResponse.json(
+          { error: "La invitación no es válida o ya se ha usado." },
+          { status: 400 },
+        );
+      }
+      if (invite.email && invite.email.toLowerCase() !== email) {
+        return NextResponse.json(
+          { error: "Esta invitación es para otro email." },
+          { status: 400 },
+        );
+      }
 
-    await db.insert(users).values({
-      id: userId,
-      email,
-      name,
-      passwordHash,
-      role: invite.role,
-    });
-    if (invite.channelIds.length > 0) {
-      await db
-        .insert(channelMembers)
-        .values(
-          invite.channelIds.map((channelId) => ({ channelId, userId })),
-        )
-        .onConflictDoNothing();
-    }
-    await db
-      .update(invites)
-      .set({ usedAt: new Date() })
-      .where(eq(invites.token, token));
+      await tx.insert(users).values({
+        id: userId,
+        email,
+        name,
+        passwordHash,
+        role: invite.role,
+      });
+      if (invite.channelIds.length > 0) {
+        await tx
+          .insert(channelMembers)
+          .values(invite.channelIds.map((channelId) => ({ channelId, userId })))
+          .onConflictDoNothing();
+      }
+      await tx
+        .update(invites)
+        .set({ usedAt: new Date() })
+        .where(eq(invites.token, token));
 
-    return NextResponse.json({ ok: true });
+      return NextResponse.json({ ok: true });
+    });
   }
 
   // Primer usuario de la instancia: se convierte en admin y se crea #general.
@@ -96,7 +107,10 @@ export async function POST(req: Request) {
     .from(users);
   if (count > 0) {
     return NextResponse.json(
-      { error: "El registro es solo con invitación. Pide un enlace a un administrador." },
+      {
+        error:
+          "El registro es solo con invitación. Pide un enlace a un administrador.",
+      },
       { status: 403 },
     );
   }
