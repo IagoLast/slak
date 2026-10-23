@@ -5,6 +5,7 @@ import { nanoid } from "nanoid";
 import { db } from "@/db";
 import {
   agents,
+  agentTasks,
   channelMembers,
   machines,
   users,
@@ -21,6 +22,7 @@ import {
   finishWorkTurn,
   queueWorkAction,
   saveWorkMemory,
+  worktreeSessionIds,
 } from "@/lib/work";
 
 const id = z.string().min(1).max(200);
@@ -188,15 +190,18 @@ export function registerWorkTools(server: McpServer, principal: WorkPrincipal) {
     {
       description:
         "Sesiones nativas asignadas a esta máquina; incluye cola y operaciones persistentes.",
-      inputSchema: {},
+      inputSchema: {
+        capabilities: z.array(z.string().max(100)).max(30).default([]),
+      },
     },
-    async () => {
+    async ({ capabilities }) => {
       const rows = await db
         .select({
           session: workSessions,
           thread: workThreads,
           bot: {
             id: agents.id,
+            mode: agents.mode,
             handle: agents.handle,
             provider: agents.provider,
             state: agents.state,
@@ -246,7 +251,11 @@ export function registerWorkTools(server: McpServer, principal: WorkPrincipal) {
           session: { ...session, tokenHash: undefined },
         })),
         turns,
-        actions,
+        actions: actions.filter(
+          (action) =>
+            action.kind !== "close-worktree" ||
+            capabilities.includes("worktree-close.v1"),
+        ),
       });
     },
   );
@@ -279,6 +288,7 @@ export function registerWorkTools(server: McpServer, principal: WorkPrincipal) {
     async ({ sessionId, generation, runtimeId, token, worktree }) => {
       const { session } = await scope(sessionId);
       if (
+        session.closedAt ||
         session.generation !== generation ||
         (session.runtimeId && session.runtimeId !== runtimeId)
       )
@@ -344,7 +354,7 @@ export function registerWorkTools(server: McpServer, principal: WorkPrincipal) {
           .from(workSessions)
           .where(eq(workSessions.id, sessionId))
           .for("update");
-        if (current.generation !== generation)
+        if (current.closedAt || current.generation !== generation)
           throw new Error("Generación obsoleta.");
         await tx
           .update(workSessions)
@@ -454,6 +464,77 @@ export function registerWorkTools(server: McpServer, principal: WorkPrincipal) {
           })
           .where(eq(workActions.id, actionId));
         if (phase === "complete") {
+          if (action.kind === "close-worktree") {
+            const ids = await worktreeSessionIds(tx, sessionId);
+            await tx
+              .update(workSessions)
+              .set({
+                closedAt: new Date(),
+                state: "stopped",
+                tokenHash: null,
+                error: null,
+              })
+              .where(inArray(workSessions.id, ids));
+            await tx
+              .update(workTurns)
+              .set({
+                status: "cancelled",
+                result: "Worktree cerrado por el equipo.",
+                updatedAt: new Date(),
+              })
+              .where(
+                and(
+                  inArray(workTurns.sessionId, ids),
+                  inArray(workTurns.status, ["queued", "running"]),
+                ),
+              );
+            const terminalAgents = await tx
+              .select({ id: agents.id })
+              .from(agents)
+              .where(
+                and(
+                  eq(agents.machineId, machineId!),
+                  eq(agents.worktree, String(action.payload.worktree)),
+                  eq(agents.mode, "session"),
+                ),
+              );
+            if (terminalAgents.length) {
+              const agentIds = terminalAgents.map((agent) => agent.id);
+              await tx
+                .update(agents)
+                .set({ state: "stopped" })
+                .where(inArray(agents.id, agentIds));
+              await tx
+                .update(agentTasks)
+                .set({
+                  status: "failed",
+                  result: "Worktree cerrado por el equipo.",
+                  updatedAt: new Date(),
+                })
+                .where(
+                  and(
+                    inArray(agentTasks.agentId, agentIds),
+                    inArray(agentTasks.status, ["queued", "running"]),
+                  ),
+                );
+            }
+            await tx
+              .update(workActions)
+              .set({ status: "failed", error: "El worktree se ha cerrado." })
+              .where(
+                and(
+                  inArray(workActions.sessionId, ids),
+                  inArray(workActions.status, ["queued", "running"]),
+                ),
+              );
+            await tx
+              .update(machines)
+              .set({
+                worktrees: sql`(select coalesce(jsonb_agg(tree), '[]'::jsonb) from jsonb_array_elements(${machines.worktrees}) tree where tree->>'worktree' <> ${String(action.payload.worktree)})`,
+                sessions: sql`(select coalesce(jsonb_agg(entry), '[]'::jsonb) from jsonb_array_elements(${machines.sessions}) entry where entry->>'worktree' <> ${String(action.payload.worktree)})`,
+              })
+              .where(eq(machines.id, machineId!));
+          }
           if (action.kind === "workspace" && worktree)
             await tx
               .update(workThreads)

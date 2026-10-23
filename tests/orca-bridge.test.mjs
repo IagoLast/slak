@@ -211,3 +211,48 @@ test("task callback contains the config path, never its credential contents", ()
   assert.match(prompt, /--file/);
   assert.ok(!prompt.includes("Bearer"));
 });
+
+test("discovery includes existing native chats only inside shared worktrees", async () => {
+  const catalog = await discover(
+    { repos: ["id:a"], worktrees: [], shareAll: false },
+    async (args) => {
+      if (args[0] === "repo") return { repos: [{ id: "a", path: "/a" }] };
+      if (args[0] === "worktree")
+        return {
+          worktrees: [
+            { path: "/a/feature", identity: { key: "wt2:local:one" } },
+          ],
+        };
+      return { terminals: [] };
+    },
+    {
+      call: async (method, args) => {
+        assert.equal(method, "session.tabs.list");
+        assert.equal(args.worktree, "path:/a/feature");
+        return {
+          tabs: [
+            { type: "terminal", id: "shell" },
+            {
+              type: "agent-session",
+              sessionId: "native-first",
+              title: "Review",
+              agent: "claude",
+            },
+            {
+              type: "agent-session",
+              sessionId: "native-active",
+              title: "Implement",
+              agent: "codex",
+              isActive: true,
+            },
+          ],
+        };
+      },
+    },
+  );
+  assert.deepEqual(
+    catalog.worktrees[0].nativeSessions.map((session) => session.id),
+    ["native-active", "native-first"],
+  );
+  assert.equal(catalog.worktrees[0].identity, "wt2:local:one");
+});

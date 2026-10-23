@@ -4,6 +4,7 @@ import { db } from "@/db";
 import {
   agents,
   channels,
+  machines,
   messages,
   workActions,
   workSessions,
@@ -12,6 +13,54 @@ import {
 } from "@/db/schema";
 
 export type Transaction = Parameters<Parameters<typeof db.transaction>[0]>[0];
+
+export async function worktreeSessionIds(tx: Transaction, sessionId: string) {
+  const [target] = await tx
+    .select({
+      machineId: agents.machineId,
+      worktree: sql<
+        string | null
+      >`coalesce(${workSessions.worktree}, case when ${workSessions.role} = 'orchestrator' then ${workThreads.worktree} end)`,
+    })
+    .from(workSessions)
+    .innerJoin(workThreads, eq(workThreads.id, workSessions.threadId))
+    .innerJoin(agents, eq(agents.id, workThreads.agentId))
+    .where(eq(workSessions.id, sessionId));
+  if (!target?.machineId || !target.worktree) return [sessionId];
+  const rows = await tx
+    .select({ id: workSessions.id })
+    .from(workSessions)
+    .innerJoin(workThreads, eq(workThreads.id, workSessions.threadId))
+    .innerJoin(agents, eq(agents.id, workThreads.agentId))
+    .where(
+      and(
+        eq(agents.machineId, target.machineId),
+        sql`coalesce(${workSessions.worktree}, case when ${workSessions.role} = 'orchestrator' then ${workThreads.worktree} end) = ${target.worktree}`,
+      ),
+    );
+  return rows.map((row) => row.id);
+}
+
+export async function assertWorktreeNotClosing(
+  tx: Transaction,
+  sessionId: string,
+) {
+  const ids = await worktreeSessionIds(tx, sessionId);
+  const [closing] = await tx
+    .select({ id: workActions.id })
+    .from(workActions)
+    .where(
+      and(
+        inArray(workActions.sessionId, ids),
+        eq(workActions.kind, "close-worktree"),
+        inArray(workActions.status, ["queued", "running"]),
+      ),
+    );
+  if (closing)
+    throw new Error(
+      "Este worktree se está cerrando. Espera a que termine la operación.",
+    );
+}
 
 /** Call inside the transaction that inserts the source message. The root lock
  * serializes simultaneous replies, including the first mention in an old thread. */
@@ -213,6 +262,35 @@ export async function queueWorkAction(
       .where(eq(workSessions.id, sessionId))
       .for("update");
     if (!session) throw new Error("Conversación no encontrada.");
+    if (session.closedAt) throw new Error("Este worktree está cerrado.");
+    if (kind === "close-worktree") {
+      // One close per machine/worktree, including conversations in other channels.
+      await tx.execute(
+        sql`select pg_advisory_xact_lock(hashtextextended(${JSON.stringify(["close-worktree", payload.worktree])}, 0))`,
+      );
+      const [target] = await tx
+        .select({ machine: machines })
+        .from(machines)
+        .innerJoin(agents, eq(agents.machineId, machines.id))
+        .innerJoin(workThreads, eq(workThreads.agentId, agents.id))
+        .where(eq(workThreads.id, session.threadId));
+      const tree = target?.machine.worktrees.find(
+        (tree) => tree.worktree === payload.worktree,
+      );
+      if (!target?.machine.capabilities.includes("worktree-close.v1"))
+        throw new Error(
+          "Actualiza y reinicia el puente de Orca para cerrar worktrees desde Slak.",
+        );
+      if (!tree || !target.machine.tokenHash)
+        throw new Error("El worktree ya no está compartido.");
+      if (
+        !target.machine.lastSeenAt ||
+        target.machine.lastSeenAt.getTime() < Date.now() - 60_000
+      )
+        throw new Error("Conecta la máquina antes de cerrar el worktree.");
+      payload = { worktree: tree.worktree, identity: tree.identity };
+    }
+    await assertWorktreeNotClosing(tx, sessionId);
     const [pending] = await tx
       .select()
       .from(workActions)
@@ -242,8 +320,9 @@ export async function claimWorkTurn(sessionId: string, turnId: string) {
       .from(workSessions)
       .where(eq(workSessions.id, sessionId))
       .for("update");
-    if (!session || session.state === "stopped")
+    if (!session || session.closedAt || session.state === "stopped")
       throw new Error("Conversación detenida.");
+    await assertWorktreeNotClosing(tx, sessionId);
     const [first] = await tx
       .select()
       .from(workTurns)

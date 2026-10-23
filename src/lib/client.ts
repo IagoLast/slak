@@ -79,14 +79,18 @@ export type WorkThreadSummary = {
   channelId: string;
   rootMessageId: string;
   worktree: string | null;
+  sessionId: string;
+  closedAt: string | null;
   handle: string;
   machine: string | null;
   machineId: string | null;
   repository: string;
   online: boolean;
   workers: {
+    id: string;
     name: string;
     worktree: string | null;
+    closedAt: string | null;
     state: WorkThreadSummary["state"];
   }[];
   state: "idle" | "running" | "waiting" | "stopped" | "error";
@@ -98,6 +102,7 @@ export type WorkSession = {
   role: "orchestrator" | "worker";
   parentId: string | null;
   worktree: string | null;
+  closedAt: string | null;
   state: WorkThreadSummary["state"];
   memory: string;
   memoryVersion: number;
@@ -124,6 +129,7 @@ export type WorkTurn = {
   author: string;
 };
 export type WorkConversationData = {
+  workspace: { name: string; branch: string } | null;
   thread: {
     id: string;
     title: string;
@@ -138,6 +144,7 @@ export type WorkConversationData = {
   turns: WorkTurn[];
   actions: { id: string; kind: string; status: string; error: string | null }[];
   bot: {
+    mode: "session" | "orchestrator";
     handle: string;
     name: string;
     machine: string;
@@ -147,6 +154,8 @@ export type WorkConversationData = {
     enabled: boolean;
   };
   canSend: boolean;
+  canManage: boolean;
+  canCloseWorktree: boolean;
   childRequests: WorkEvent[];
   hasOlder: boolean;
   next: { events: string | null; turns: string | null };

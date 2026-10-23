@@ -1,3 +1,4 @@
+import WorktreeEntry from "@/components/WorktreeEntry";
 import WorkList from "@/components/WorkList";
 import { worktreeName } from "@/lib/workspaces";
 
@@ -7,6 +8,14 @@ export default async function WorkPage({
   searchParams: Promise<{ machineId?: string; worktree?: string }>;
 }) {
   const { machineId, worktree } = await searchParams;
+  if (machineId && worktree)
+    return (
+      <WorktreeEntry
+        key={`${machineId}:${worktree}`}
+        machineId={machineId}
+        worktree={worktree}
+      />
+    );
   return (
     <div className="flex-1 overflow-auto">
       <header className="border-b px-6 py-5">

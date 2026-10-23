@@ -1,6 +1,7 @@
 import { sql } from "drizzle-orm";
 import type { SharedWorktree } from "@/lib/workspaces";
 import {
+  boolean,
   index,
   uniqueIndex,
   jsonb,
@@ -237,6 +238,7 @@ export const machines = pgTable("machines", {
     .notNull()
     .references(() => users.id),
   tokenHash: text("token_hash").unique(),
+  capabilities: jsonb("capabilities").$type<string[]>().notNull().default([]),
   repositories: jsonb("repositories")
     .$type<{ id: string; name: string }[]>()
     .notNull()
@@ -336,6 +338,9 @@ export const workSessions = pgTable(
     runtimeId: text("runtime_id"),
     worktree: text("worktree"),
     generation: integer("generation").notNull().default(1),
+    closedAt: timestamp("closed_at", { withTimezone: true }),
+    imported: boolean("imported").notNull().default(false),
+    provider: text("provider", { enum: ["codex", "claude"] }),
     memory: text("memory").notNull().default(""),
     memoryVersion: integer("memory_version").notNull().default(0),
     context: jsonb("context")
@@ -421,7 +426,14 @@ export const workActions = pgTable(
       .notNull()
       .references(() => workSessions.id, { onDelete: "cascade" }),
     kind: text("kind", {
-      enum: ["workspace", "stop", "compact", "rotate", "respond"],
+      enum: [
+        "workspace",
+        "stop",
+        "compact",
+        "rotate",
+        "respond",
+        "close-worktree",
+      ],
     }).notNull(),
     payload: jsonb("payload")
       .$type<Record<string, unknown>>()

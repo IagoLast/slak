@@ -88,9 +88,10 @@ crear un bot, compartir una terminal o conectar un agente externo.
 
 El mensaje directo conserva la conversación con el padre. Los encargos de otros
 canales mantienen hilos, permisos y contextos separados: una identidad de proyecto
-no implica compartir memoria privada entre canales. Las conversaciones hijas se
-siguen desde Orca; en Slak se muestran sus estados y las solicitudes que necesitan
-una respuesta del equipo.
+no implica compartir memoria privada entre canales. Cada worktree abre directamente
+la conversación de su agente en Slak, con su historial, actividad y solicitudes
+pendientes. También puedes seguir coordinando
+el trabajo desde el padre.
 
 1. En **Máquinas compartidas → Conectar mi Orca**, pulsa **Copiar comando**.
 2. Pégalo en una terminal de la **misma máquina que Orca** y elige los proyectos
@@ -109,15 +110,17 @@ una respuesta del equipo.
    una URL HTTPS de Slak accesible desde ella. El puente no abre puertos.
 
 3. La barra lateral muestra **máquina → proyecto → agente padre y worktrees**.
-   Los worktrees conservan su último estado cuando el puente se desconecta, y los
-   hilos abren siempre la conversación con el padre.
+   Cada worktree abre directamente su agente y conserva su último estado cuando
+   el puente se desconecta. Si hay varios agentes en un hilo, las
+   pestañas de la conversación permiten cambiar entre el padre y los subagentes.
 4. Habla con el padre desde la barra lateral, añádelo a un canal y menciona
    `@alias`, o usa **Encargar tarea**. El padre responde y reúne los resultados.
 5. El padre puede crear subagentes con `work_delegate`; el puente prepara un
    worktree distinto para cada subagente nuevo. Las sesiones ya existentes
    conservan su workspace. Los resultados vuelven automáticamente al padre.
-   Slak no ofrece mensajes directos ni creación manual de subagentes. Las preguntas
-   y aprobaciones de los hijos aparecen en la conversación del padre.
+   Puedes intervenir directamente en el chat de un subagente desde su worktree;
+   el resultado también llega al padre. Las preguntas y aprobaciones siguen
+   apareciendo tanto en el chat del subagente como en el del padre.
 
    La vista se puede cambiar entre **Solo respuestas** (por defecto), **Mensajes
    y avances** y **Toda la actividad**. La preferencia se guarda en el navegador.
@@ -132,6 +135,20 @@ una respuesta del equipo.
    generación conservando hilo, memoria y eventos. Detener el bot detiene sus
    sesiones compartidas; el worktree no se borra. Desconectar la máquina revoca el
    puente y deja los procesos locales tal como están.
+7. **Cerrar worktree** suspende todos sus agentes y terminales y lo archiva en
+   Orca, previa confirmación. Conserva archivos, cambios e historial. Solo el
+   propietario de la máquina o un administrador puede cerrarlo, con el puente
+   conectado y actualizado. Slak muestra el cierre cuando Orca lo confirma; si
+   falla, conserva el error y permite revisarlo. Puedes reabrirlo desde Orca.
+
+Al entrar en un worktree que aún no tiene conversación, Slak reutiliza el chat
+nativo activo de Orca o la sesión de terminal compartida. Si no hay agente,
+prepara una conversación nueva y lo inicia al enviar el primer mensaje. Los chats
+importados se guardan en un canal privado para quien lo abre y el propietario de
+la máquina; los hilos existentes conservan sus permisos. El historial anterior de
+las sesiones de terminal permanece en Orca; sus nuevas respuestas llegan a Slak.
+Actualiza y reinicia el puente para habilitar la apertura y el cierre de worktrees;
+los puentes anteriores mantienen sus conversaciones existentes.
 
 ### Conexión manual avanzada
 
@@ -184,8 +201,9 @@ respuestas sobre una solicitud que ya cambió.
 
 Las sesiones de terminal existentes siguen usando el adaptador anterior y sus
 resultados `report`; no adquieren retrospectivamente eventos estructurados. El
-catálogo automático de sesiones existentes sigue siendo de terminales Codex/Claude;
-las conversaciones nativas que Slak crea se gestionan desde **Hilos de trabajo**.
+catálogo incluye terminales y chats nativos Codex/Claude de los worktrees
+compartidos. Los chats nativos importados conservan su sesión e historial de Orca,
+sin iniciar otro agente ni cambiar sus instrucciones.
 No se ejecutan automáticamente los setup hooks al crear un worktree.
 
 Los canales privados y DMs mantienen sus permisos en listados, historial y MCP.
@@ -238,7 +256,7 @@ npm run build
 Pruebas de concurrencia y aislamiento MCP contra una base de pruebas independiente:
 
 ```bash
-SLAK_TEST_DATABASE=1 DATABASE_URL=postgres://.../slak_work_checks npx tsx --test tests/work.test.ts
+SLAK_TEST_DATABASE=1 DATABASE_URL=postgres://.../slak_work_checks npx tsx --test tests/work.test.ts tests/worktree-chat.test.ts
 SLAK_TEST_DATABASE=1 DATABASE_URL=postgres://...@127.0.0.1:54329/slak npx tsx --test tests/machine-pairing.test.ts
 ```
 

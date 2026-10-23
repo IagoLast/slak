@@ -187,3 +187,25 @@ test("context percentage uses provider measurements and restored prompts include
   assert.match(prompt, /delegate/);
   assert.doesNotMatch(prompt, /slak_[a-f0-9]{64}/);
 });
+
+test("imported chats include Orca user messages without duplicating Slak submissions", () => {
+  const items = ["external", "orca:sent"].map((itemId, i) => ({
+    itemId,
+    sequence: i,
+    revision: 1,
+    observedAt: 0,
+    body: {
+      kind: "message",
+      role: "user",
+      blocks: [{ type: "text", text: itemId }],
+    },
+  }));
+  assert.deepEqual(publicEvents(items, 1), []);
+  assert.deepEqual(
+    publicEvents(items, 1, {
+      includeUserMessages: true,
+      excludedUserItemIds: ["orca:sent"],
+    }).map((event) => event.itemId),
+    ["1:external"],
+  );
+});

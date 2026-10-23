@@ -3,6 +3,7 @@ import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import useSWR from "swr";
 import {
+  Archive,
   ArrowUp,
   ArrowUpRight,
   Bot,
@@ -30,7 +31,7 @@ import {
 } from "@/lib/client";
 import MessageContent from "@/components/MessageContent";
 import { workStateLabels } from "@/components/WorkList";
-import { worktreeName } from "@/lib/workspaces";
+import { worktreeName, workSessionHref } from "@/lib/workspaces";
 import {
   conversationViews,
   visibleWorkEvents,
@@ -62,12 +63,25 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 
+import {
+  AlertDialog,
+  AlertDialogContent,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogCancel,
+  AlertDialogAction,
+} from "@/components/ui/alert-dialog";
+
 export default function WorkConversation({
   threadId,
+  sessionId,
   compact = false,
   onClose,
 }: {
   threadId: string;
+  sessionId?: string;
   compact?: boolean;
   onClose?: () => void;
 }) {
@@ -75,6 +89,7 @@ export default function WorkConversation({
   const [draft, setDraft] = useState("");
   const [busy, setBusy] = useState(false);
   const [memoryOpen, setMemoryOpen] = useState(false);
+  const [closeOpen, setCloseOpen] = useState(false);
   const [older, setOlder] = useState<{
     events: WorkEvent[];
     turns: WorkTurn[];
@@ -84,7 +99,7 @@ export default function WorkConversation({
   const [cursor, setCursor] = useState<WorkConversationData["next"]>();
   const [actionError, setActionError] = useState("");
   const { data, error, mutate } = useSWR<WorkConversationData>(
-    `/api/work/${threadId}`,
+    `/api/work/${threadId}${sessionId ? `?session=${encodeURIComponent(sessionId)}` : ""}`,
     fetcher,
     { refreshInterval: 1800 },
   );
@@ -202,6 +217,9 @@ export default function WorkConversation({
       </div>
     );
   const online = data.bot.online;
+  const worktree =
+    session.worktree ||
+    (session.role === "orchestrator" ? data.thread.worktree : null);
   const queued = turns.filter((t) => t.status === "queued").length;
   const activeAction = data.actions.find((a) =>
     ["queued", "running"].includes(a.status),
@@ -215,22 +233,39 @@ export default function WorkConversation({
         </div>
         <div className="min-w-0 flex-1">
           <h1 className="truncate font-semibold tracking-tight">
-            {data.thread.title}
+            {data.workspace?.name ||
+              (worktree ? worktreeName(worktree) : data.thread.title)}
           </h1>
           <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-            <span>@{data.bot.handle}</span>
+            <span>{session.name}</span>
             <span>·</span>
             <span className="inline-flex items-center gap-1">
-              <Users className="size-3" />
-              Hilo compartido
+              <Server className="size-3" />
+              {data.bot.machine}
             </span>
             <Badge
               variant={session.state === "error" ? "destructive" : "secondary"}
             >
-              {workStateLabels[session.state]}
+              {session.closedAt
+                ? "Worktree cerrado"
+                : online
+                  ? workStateLabels[session.state]
+                  : "Sin conexión"}
             </Badge>
           </div>
         </div>
+        {!compact && data.canCloseWorktree && (
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={busy || !!activeAction || !online}
+            onClick={() => setCloseOpen(true)}
+          >
+            <Archive className="size-4" />
+            <span className="hidden sm:inline">Cerrar worktree</span>
+            <span className="sr-only sm:hidden">Cerrar worktree</span>
+          </Button>
+        )}
         {compact && (
           <Button
             variant="ghost"
@@ -238,7 +273,7 @@ export default function WorkConversation({
             asChild
             title="Abrir conversación completa"
           >
-            <Link href={`/work/${threadId}`}>
+            <Link href={workSessionHref(threadId, session.id)}>
               <ArrowUpRight className="size-4" />
             </Link>
           </Button>
@@ -267,6 +302,7 @@ export default function WorkConversation({
                 busy ||
                 !!activeAction ||
                 !data.canSend ||
+                !data.canManage ||
                 ["running", "waiting"].includes(session.state)
               }
               onSelect={() =>
@@ -283,6 +319,7 @@ export default function WorkConversation({
                 busy ||
                 !!activeAction ||
                 !data.canSend ||
+                !data.canManage ||
                 ["running", "waiting"].includes(session.state)
               }
               onSelect={() =>
@@ -300,6 +337,7 @@ export default function WorkConversation({
                 busy ||
                 !!activeAction ||
                 !data.canSend ||
+                !data.canManage ||
                 session.state === "stopped"
               }
               onSelect={() =>
@@ -328,77 +366,38 @@ export default function WorkConversation({
         )}
       </header>
       <div className="flex min-h-0 flex-1">
-        {!compact && (
-          <aside className="hidden w-60 shrink-0 flex-col border-r bg-muted/15 p-4 lg:flex">
-            <p className="mb-3 text-xs font-medium text-muted-foreground">
-              EQUIPO DEL PROYECTO
-            </p>
-            <div className="space-y-1">
-              {data.sessions.map((s) => (
-                <div
-                  key={s.id}
-                  className={`flex items-start gap-2 rounded-md py-2 ${s.role === "worker" ? "pl-3" : ""}`}
-                >
-                  {s.role === "orchestrator" ? (
-                    <Bot className="mt-0.5 size-4 shrink-0" />
-                  ) : (
-                    <GitBranch className="mt-0.5 size-4 shrink-0" />
-                  )}
-                  <span className="min-w-0">
-                    <span className="block truncate text-sm">
-                      {s.role === "orchestrator" ? "Agente padre" : s.name}
-                    </span>
-                    <span className="block text-xs text-muted-foreground">
-                      {online ? workStateLabels[s.state] : "Sin conexión"}
-                    </span>
-                    {s.role === "worker" && s.worktree && (
-                      <span
-                        className="block truncate text-xs text-muted-foreground"
-                        title={s.worktree}
-                      >
-                        {worktreeName(s.worktree)}
-                      </span>
-                    )}
-                  </span>
-                </div>
-              ))}
-            </div>
-            <p className="mt-3 mb-4 text-xs text-muted-foreground">
-              Hablas con el agente padre. Él coordina los worktrees y recoge los
-              resultados de los subagentes.
-            </p>
-            <div className="mt-auto space-y-3 border-t pt-4 text-xs text-muted-foreground">
-              <p className="flex items-center gap-2">
-                <Server className="size-3.5" />
-                {data.bot.machine}
-              </p>
-              <p>
-                {online ? "Máquina conectada" : "Puente de Orca desconectado"}
-              </p>
-              {!online && (
-                <p>
-                  {data.bot.enabled
-                    ? "Abre el conector de Slak en esa máquina para reanudar el trabajo."
-                    : "La conexión está revocada. Vuelve a conectar la máquina."}{" "}
-                  <Link href="/machines" className="underline">
-                    Revisar conexión
-                  </Link>
-                </p>
-              )}
-              <p className="flex items-start gap-2">
-                <GitBranch className="size-3.5 shrink-0" />
-                <span className="break-all">
-                  {data.thread.worktree?.replace(/^path:/, "") ||
-                    "Sin workspace aislado todavía"}
-                </span>
-              </p>
-            </div>
-          </aside>
-        )}
         <main className="flex min-h-0 min-w-0 flex-1 flex-col">
           <div className="flex flex-wrap items-center gap-2 border-b px-5 py-2.5 text-xs">
-            <MessageSquare className="size-3.5 text-muted-foreground" />
-            <span className="font-medium">{session.name}</span>
+            {data.sessions.length > 1 ? (
+              <nav
+                aria-label="Agentes de la conversación"
+                className="flex w-full min-w-0 gap-1 overflow-x-auto sm:w-auto sm:flex-1"
+              >
+                {data.sessions.map((item) => (
+                  <Link
+                    key={item.id}
+                    href={workSessionHref(threadId, item.id)}
+                    aria-current={item.id === session.id ? "page" : undefined}
+                    className={`flex shrink-0 items-center gap-2 rounded-md px-3 py-2 ${item.id === session.id ? "bg-accent font-medium" : "text-muted-foreground hover:bg-muted"}`}
+                  >
+                    {item.role === "orchestrator" ? (
+                      <Bot className="size-3.5" />
+                    ) : (
+                      <GitBranch className="size-3.5" />
+                    )}
+                    {item.role === "orchestrator" ? "Agente padre" : item.name}
+                    {item.state === "running" && !item.closedAt && (
+                      <Loader2 className="size-3 animate-spin" />
+                    )}
+                  </Link>
+                ))}
+              </nav>
+            ) : (
+              <span className="flex items-center gap-2">
+                <MessageSquare className="size-3.5" />
+                Conversación
+              </span>
+            )}
             <Select value={view} onValueChange={setView}>
               <SelectTrigger
                 className="ml-auto"
@@ -415,12 +414,21 @@ export default function WorkConversation({
                 ))}
               </SelectContent>
             </Select>
-            {!online && (
+            {!online && !session.closedAt && (
               <span className="ml-auto text-muted-foreground">
                 Se enviará cuando vuelva la máquina
               </span>
             )}
           </div>
+          {session.closedAt && (
+            <div
+              role="status"
+              className="border-b bg-muted/40 px-5 py-3 text-sm text-muted-foreground"
+            >
+              Worktree cerrado y archivado en Orca. Los archivos y esta
+              conversación se conservan.
+            </div>
+          )}
           <div
             ref={scroll}
             onScroll={() => {
@@ -456,7 +464,18 @@ export default function WorkConversation({
               )}
               {timeline.map((item) =>
                 item.turn ? (
-                  <Turn key={item.key} turn={item.turn} />
+                  <div key={item.key} className="space-y-5">
+                    <Turn turn={item.turn} />
+                    {data.bot.mode === "session" && item.turn.result && (
+                      <div className="space-y-2">
+                        <p className="flex items-center gap-2 text-xs font-medium">
+                          <Bot className="size-4 text-primary" />
+                          {session.name}
+                        </p>
+                        <MessageContent content={item.turn.result} />
+                      </div>
+                    )}
+                  </div>
                 ) : (
                   <HarnessEvent
                     key={item.key}
@@ -552,13 +571,15 @@ export default function WorkConversation({
                   }
                 }}
                 placeholder={`Escribe a ${session.name.toLowerCase()}…`}
-                disabled={!data.canSend || session.state === "stopped"}
+                disabled={
+                  !data.canSend || !!activeAction || session.state === "stopped"
+                }
                 maxLength={16000}
                 className="min-h-24 resize-none border-0 bg-transparent shadow-none focus-visible:ring-0"
               />
               <div className="flex items-center justify-between gap-2 px-3 pb-3">
                 <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                  <Bot className="size-3.5" /> Agente padre · @{data.bot.handle}
+                  <Bot className="size-3.5" /> {session.name}
                 </span>
                 <Button
                   size="icon"
@@ -566,6 +587,7 @@ export default function WorkConversation({
                   aria-label="Enviar mensaje"
                   disabled={
                     busy ||
+                    !!activeAction ||
                     !draft.trim() ||
                     !data.canSend ||
                     session.state === "stopped"
@@ -586,6 +608,35 @@ export default function WorkConversation({
           </div>
         </main>
       </div>
+      <AlertDialog open={closeOpen} onOpenChange={setCloseOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              Cerrar{" "}
+              {data.workspace?.name ||
+                (worktree ? worktreeName(worktree) : "worktree")}
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              Se detendrán todos los agentes y terminales de este worktree y se
+              archivará en Orca. Los archivos y el historial se conservan.
+              Podrás volver a abrirlo desde Orca.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancelar</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() =>
+                void command({
+                  action: "close-worktree",
+                  sessionId: session.id,
+                }).catch(() => {})
+              }
+            >
+              Cerrar worktree
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
       <Dialog open={memoryOpen} onOpenChange={setMemoryOpen}>
         <DialogContent className="max-h-[85dvh] overflow-y-auto sm:max-w-2xl">
           <DialogHeader>
@@ -688,8 +739,12 @@ function HarnessEvent({
     return (
       <div className="space-y-2">
         <p className="flex items-center gap-2 text-xs font-medium">
-          <Bot className="size-4 text-primary" />
-          {name}
+          {b.role === "user" ? (
+            <Users className="size-4" />
+          ) : (
+            <Bot className="size-4 text-primary" />
+          )}
+          {b.role === "user" ? "Mensaje desde Orca" : name}
         </p>
         {blocks.map((block, i) =>
           block.type === "text" ? (

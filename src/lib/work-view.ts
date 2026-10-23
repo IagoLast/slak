@@ -28,6 +28,7 @@ export function visibleWorkEvents(events: WorkEvent[], view: ConversationView) {
     const body = event.body;
     if (
       body.kind !== "message" ||
+      body.role === "user" ||
       body.agentId ||
       typeof body.turnId !== "string" ||
       !hasText(body)
@@ -45,6 +46,7 @@ export function visibleWorkEvents(events: WorkEvent[], view: ConversationView) {
     if (body.kind === "status")
       return ["warning", "error"].includes(String(body.tone));
     if (body.kind !== "message" || body.agentId || !hasText(body)) return false;
+    if (body.role === "user") return true;
     if (view === "messages") return true;
     // Old events without turn metadata remain readable; do not guess which
     // text was a final response from timestamps or the message's wording.

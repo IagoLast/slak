@@ -10,8 +10,10 @@ import {
   messages,
   users,
   workThreads,
+  workSessions,
+  workTurns,
 } from "@/db/schema";
-import { enqueueWork } from "@/lib/work";
+import { assertWorktreeNotClosing, enqueueWork } from "@/lib/work";
 import type { SessionUser } from "@/lib/session";
 
 export function hashToken(token: string) {
@@ -160,19 +162,34 @@ export async function agentInbox(agentId: string) {
 }
 
 export async function claimTask(agentId: string, taskId: string) {
-  const [task] = await db
-    .update(agentTasks)
-    .set({ status: "running", updatedAt: new Date() })
-    .where(
-      and(
-        eq(agentTasks.id, taskId),
-        eq(agentTasks.agentId, agentId),
-        eq(agentTasks.status, "queued"),
-      ),
-    )
-    .returning();
-  if (!task) throw new Error("La tarea ya fue recogida o no te pertenece.");
-  return task;
+  return db.transaction(async (tx) => {
+    const [session] = await tx
+      .select({ id: workSessions.id })
+      .from(workSessions)
+      .innerJoin(workThreads, eq(workThreads.id, workSessions.threadId))
+      .where(eq(workThreads.agentId, agentId))
+      .limit(1);
+    if (session) await assertWorktreeNotClosing(tx, session.id);
+    const [task] = await tx
+      .update(agentTasks)
+      .set({ status: "running", updatedAt: new Date() })
+      .where(
+        and(
+          eq(agentTasks.id, taskId),
+          eq(agentTasks.agentId, agentId),
+          eq(agentTasks.status, "queued"),
+        ),
+      )
+      .returning();
+    if (!task) throw new Error("La tarea ya fue recogida o no te pertenece.");
+    await tx
+      .update(workTurns)
+      .set({ status: "running", updatedAt: new Date() })
+      .where(
+        and(eq(workTurns.id, taskId), eq(workTurns.messageId, task.messageId)),
+      );
+    return task;
+  });
 }
 
 export async function finishTask(
@@ -195,6 +212,12 @@ export async function finishTask(
       .returning();
     // Compare-and-set makes a repeated completion safe: never post the same answer twice.
     if (!task) throw new Error("La tarea no está en curso o no te pertenece.");
+    await tx
+      .update(workTurns)
+      .set({ status, result, updatedAt: new Date() })
+      .where(
+        and(eq(workTurns.id, taskId), eq(workTurns.messageId, task.messageId)),
+      );
     const [source] = await tx
       .select()
       .from(messages)

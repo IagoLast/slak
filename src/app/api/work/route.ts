@@ -21,7 +21,11 @@ export async function GET(req: Request) {
       title: workThreads.title,
       channelId: workThreads.channelId,
       rootMessageId: workThreads.rootMessageId,
-      worktree: workThreads.worktree,
+      worktree: sql<
+        string | null
+      >`coalesce(${workSessions.worktree}, ${workThreads.worktree})`,
+      sessionId: workSessions.id,
+      closedAt: workSessions.closedAt,
       handle: agents.handle,
       machine: machines.name,
       machineId: agents.machineId,
@@ -70,10 +74,12 @@ export async function GET(req: Request) {
   const workers = threads.length
     ? await db
         .select({
+          id: workSessions.id,
           threadId: workSessions.threadId,
           name: workSessions.name,
           worktree: workSessions.worktree,
           state: workSessions.state,
+          closedAt: workSessions.closedAt,
         })
         .from(workSessions)
         .where(
@@ -91,7 +97,13 @@ export async function GET(req: Request) {
       ...thread,
       workers: workers
         .filter((worker) => worker.threadId === thread.id)
-        .map(({ name, worktree, state }) => ({ name, worktree, state })),
+        .map(({ id, name, worktree, state, closedAt }) => ({
+          id,
+          name,
+          worktree,
+          state,
+          closedAt,
+        })),
       online:
         machineEnabled &&
         !!machineSeenAt &&

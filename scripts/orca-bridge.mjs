@@ -11,6 +11,7 @@ import {
   realpath,
 } from "node:fs/promises";
 import { createWorkBridge } from "./orca-work.mjs";
+import { loadNativeRuntime } from "./orca-native.mjs";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
@@ -81,7 +82,11 @@ export function keepMachineOnline(client, intervalMs = 15000) {
   return () => clearInterval(timer);
 }
 
-export async function discover({ shareAll, repos, worktrees }, run = orca) {
+export async function discover(
+  { shareAll, repos, worktrees },
+  run = orca,
+  native = null,
+) {
   const all = (await run(["repo", "list"])).repos ?? [];
   const selected = all.filter(
     (r) =>
@@ -111,12 +116,34 @@ export async function discover({ shareAll, repos, worktrees }, run = orca) {
         (!worktrees.length || worktrees.includes(`path:${w.path}`)),
     )) {
       if (sharedWorktrees.length >= 500) break;
+      const chats = native
+        ? await native.call("session.tabs.list", {
+            worktree: `path:${wt.path}`,
+          })
+        : null;
       sharedWorktrees.push({
         worktree: `path:${wt.path}`,
         name: (wt.displayName || wt.branch || wt.path).slice(0, 100),
         repository: `id:${repo.id}`,
         branch: (wt.branch || "").replace(/^refs\/heads\//, "").slice(0, 500),
         status: (wt.workspaceStatus || "").slice(0, 80),
+        ...(wt.identity?.key && { identity: wt.identity.key }),
+        ...(chats && {
+          nativeSessions: (chats.tabs ?? [])
+            .filter(
+              (tab) =>
+                tab.type === "agent-session" &&
+                ["codex", "claude"].includes(tab.agent) &&
+                tab.sessionId,
+            )
+            .sort((a, b) => Number(!!b.isActive) - Number(!!a.isActive))
+            .map((tab) => ({
+              id: tab.sessionId,
+              name: (tab.title || tab.agent).slice(0, 100),
+              provider: tab.agent,
+            }))
+            .slice(0, 100),
+        }),
       });
       const { terminals = [] } = await run([
         "terminal",
@@ -367,6 +394,7 @@ async function main() {
   });
   let announced = false;
   let catalog,
+    native,
     lastDiscovery = 0;
   try {
     do {
@@ -380,14 +408,22 @@ async function main() {
           );
         stopHeartbeat = keepMachineOnline(client);
         if (!catalog || Date.now() - lastDiscovery > 30_000) {
-          catalog = await discover({
-            shareAll: values["share-all"],
-            repos: values.repo,
-            worktrees: values.worktree,
-          });
+          native ??= await loadNativeRuntime().catch(() => null);
+          catalog = await discover(
+            {
+              shareAll: values["share-all"],
+              repos: values.repo,
+              worktrees: values.worktree,
+            },
+            orca,
+            native,
+          );
           lastDiscovery = Date.now();
         }
-        await call(client, "heartbeat", catalog);
+        await call(client, "heartbeat", {
+          ...catalog,
+          capabilities: native ? ["worktree-chat.v1", "worktree-close.v1"] : [],
+        });
         if (!announced) {
           console.log("Máquina conectada a Slak. Ya puedes volver a la app.");
           announced = true;
@@ -442,6 +478,7 @@ async function main() {
           await save();
           lastDiscovery = 0;
         }
+        await workTick(client, catalog);
         const { tasks } = await call(client, "list_tasks");
         const running = new Set(
           tasks.filter((t) => t.status === "running").map((t) => t.agentId),
@@ -494,7 +531,6 @@ async function main() {
         }
         for (const id of Object.keys(state.tasks))
           if (!tasks.some((t) => t.id === id)) delete state.tasks[id];
-        await workTick(client, catalog);
         await save();
         if (values.once) break;
       } catch (error) {

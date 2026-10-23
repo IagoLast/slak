@@ -134,3 +134,232 @@ test("the parent stays on the project and each new worker receives its own reusa
     await rm(dir, { recursive: true, force: true });
   }
 });
+
+test("closing suspends and archives the exact workspace without deleting files", async () => {
+  const { closeWorktree } = await import("../scripts/orca-work.mjs");
+  const calls = [];
+  let archived = false;
+  await closeWorktree(
+    {
+      call: async (method, args) => {
+        calls.push([method, args]);
+        if (method === "worktree.set") archived = args.isArchived;
+        return {
+          worktree: {
+            path: "/project/feature",
+            repoId: "repo",
+            hostId: "local",
+            identity: { key: "wt2:local:one" },
+            isArchived: archived,
+          },
+        };
+      },
+    },
+    { thread: { repository: "id:repo" } },
+    { worktree: "path:/project/feature", identity: "wt2:local:one" },
+    {
+      repositories: [{ id: "id:repo" }],
+      worktrees: [{ worktree: "path:/project/feature", repository: "id:repo" }],
+    },
+  );
+  assert.deepEqual(
+    calls.map(([method]) => method),
+    ["worktree.show", "worktree.sleep", "worktree.set", "worktree.show"],
+  );
+  assert.equal(calls[1][1].worktree, "identity:wt2:local:one");
+});
+
+test("close refuses changed identities and a narrower sharing selection before stopping anything", async () => {
+  const { closeWorktree } = await import("../scripts/orca-work.mjs");
+  const catalog = {
+    repositories: [{ id: "id:repo" }],
+    worktrees: [{ worktree: "path:/feature", repository: "id:repo" }],
+  };
+  const entry = { thread: { repository: "id:repo" } };
+  const payload = { worktree: "path:/feature", identity: "old" };
+  const native = {
+    call: async (method) => {
+      assert.equal(method, "worktree.show");
+      return {
+        worktree: {
+          path: "/feature",
+          repoId: "repo",
+          identity: { key: "replacement" },
+        },
+      };
+    },
+  };
+  await assert.rejects(
+    closeWorktree(native, entry, payload, catalog),
+    /cambió/,
+  );
+  await assert.rejects(
+    closeWorktree(
+      { call: () => assert.fail("Must not call Orca") },
+      entry,
+      payload,
+      catalog,
+      ["path:/other"],
+    ),
+    /no está compartido/,
+  );
+});
+
+test("a shutdown failure never archives a worktree or reports success", async () => {
+  const { closeWorktree } = await import("../scripts/orca-work.mjs");
+  const calls = [];
+  await assert.rejects(
+    closeWorktree(
+      {
+        call: async (method) => {
+          calls.push(method);
+          if (method === "worktree.sleep")
+            throw new Error("shutdown unverified");
+          return { worktree: { path: "/feature", repoId: "repo" } };
+        },
+      },
+      { thread: { repository: "id:repo" } },
+      { worktree: "path:/feature" },
+      {
+        repositories: [{ id: "id:repo" }],
+        worktrees: [{ worktree: "path:/feature", repository: "id:repo" }],
+      },
+    ),
+    /shutdown unverified/,
+  );
+  assert.deepEqual(calls, ["worktree.show", "worktree.sleep"]);
+});
+
+test("imported conversations preserve the existing agent's context and receive only the new message", () => {
+  const prompt = workPrompt(
+    {
+      session: { role: "orchestrator", imported: true },
+      bot: { handle: "parent" },
+    },
+    { id: "turn", kind: "human", prompt: "Sigue con la revisión" },
+    { turns: [], worktree: "path:/feature" },
+    "/unused",
+    true,
+  );
+  assert.match(prompt, /Sigue con la revisión/);
+  assert.doesNotMatch(prompt, /Eres|delegate|remember/);
+});
+
+test("opening an imported chat synchronizes its existing runtime without creating or prompting an agent", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "slak-import-"));
+  const entry = {
+    session: {
+      id: "imported",
+      generation: 1,
+      role: "orchestrator",
+      state: "idle",
+      runtimeId: "native-existing",
+      worktree: "path:/project/feature",
+      imported: true,
+    },
+    thread: {
+      id: "thread",
+      repository: "id:repo",
+      worktree: "path:/project/feature",
+    },
+    bot: { state: "ready", mode: "orchestrator", provider: "codex" },
+  };
+  let synced;
+  const tick = createWorkBridge({
+    config: { token: "test", url: "http://localhost/api/mcp" },
+    configPath: join(dir, "config.json"),
+    state: {},
+    save: async () => {},
+    call: async (_client, name, args) => {
+      if (name === "work_inbox")
+        return { sessions: [entry], turns: [], actions: [] };
+      if (name === "work_sync") synced = args;
+      return {};
+    },
+    run: async (args) => {
+      assert.deepEqual(args, ["repo", "list"]);
+      return { repos: [{ id: "repo", path: "/project" }] };
+    },
+    runtimeLoader: async () => ({
+      call: async (method, args) => {
+        assert.equal(method, "agentSession.history");
+        assert.equal(args.sessionId, "native-existing");
+        return {
+          page: {
+            items: [
+              {
+                itemId: "original-user",
+                revision: 1,
+                sequence: 1,
+                observedAt: 0,
+                body: {
+                  kind: "message",
+                  role: "user",
+                  blocks: [{ type: "text", text: "Original request" }],
+                },
+              },
+            ],
+            fence: 1,
+            epoch: "test",
+            liveCursor: { epoch: "test", sequence: 1 },
+            hasOlder: false,
+            working: false,
+            actionablePromptIds: [],
+          },
+        };
+      },
+    }),
+  });
+  try {
+    await tick({}, { repositories: [{ id: "id:repo" }] });
+    assert.equal(synced.state, "idle");
+    assert.equal(synced.events[0].body.role, "user");
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("an interrupted close without a receipt is reported, never silently retried", async () => {
+  const reports = [];
+  const entry = {
+    session: {
+      id: "worker",
+      generation: 1,
+      role: "worker",
+      worktree: "path:/feature",
+    },
+    thread: { repository: "id:repo" },
+    bot: {},
+  };
+  const tick = createWorkBridge({
+    config: {},
+    configPath: "/unused",
+    state: {},
+    save: async () => {},
+    run: () => assert.fail("Must not call Orca"),
+    call: async (_client, name, args) => {
+      if (name === "work_inbox")
+        return {
+          sessions: [entry],
+          turns: [{ id: "queued", sessionId: "worker", status: "queued" }],
+          actions: [
+            {
+              id: "close",
+              sessionId: "worker",
+              kind: "close-worktree",
+              status: "running",
+              payload: { worktree: "path:/feature" },
+            },
+          ],
+        };
+      reports.push(args);
+      return {};
+    },
+    runtimeLoader: async () => ({
+      call: () => assert.fail("Must not call Orca"),
+    }),
+  });
+  await tick({}, { repositories: [{ id: "id:repo" }] });
+  assert.equal(reports[0].phase, "fail");
+  assert.match(reports[0].error, /interrumpió/);
+});

@@ -168,6 +168,10 @@ const STATEMENTS = [
   sql`ALTER TABLE work_sessions ADD COLUMN IF NOT EXISTS worktree text`,
   sql`UPDATE work_sessions s SET worktree = t.worktree FROM work_threads t
       WHERE s.thread_id = t.id AND s.role = 'worker' AND s.runtime_id IS NOT NULL AND s.worktree IS NULL`,
+  sql`ALTER TABLE work_sessions ADD COLUMN IF NOT EXISTS closed_at timestamptz`,
+  sql`ALTER TABLE work_sessions ADD COLUMN IF NOT EXISTS imported boolean NOT NULL DEFAULT false`,
+  sql`ALTER TABLE work_sessions ADD COLUMN IF NOT EXISTS provider text`,
+  sql`ALTER TABLE machines ADD COLUMN IF NOT EXISTS capabilities jsonb NOT NULL DEFAULT '[]'`,
 ];
 
 const SCHEMA_VERSION = STATEMENTS.length;

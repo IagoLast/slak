@@ -91,6 +91,7 @@ export async function POST(request: Request) {
       description:
         "Mantiene la presencia online. Las máquinas anuncian únicamente los proyectos que su propietario comparte.",
       inputSchema: {
+        capabilities: z.array(z.string().max(100)).max(30).optional(),
         repositories: z
           .array(
             z.object({
@@ -120,13 +121,24 @@ export async function POST(request: Request) {
               repository: z.string().min(1).max(500),
               branch: z.string().max(500),
               status: z.string().max(80),
+              identity: z.string().max(500).optional(),
+              nativeSessions: z
+                .array(
+                  z.object({
+                    id: z.string().min(1).max(200),
+                    name: z.string().max(100),
+                    provider: z.enum(["codex", "claude"]),
+                  }),
+                )
+                .max(100)
+                .optional(),
             }),
           )
           .max(500)
           .optional(),
       },
     },
-    async ({ repositories, sessions, worktrees }) => {
+    async ({ repositories, sessions, worktrees, capabilities }) => {
       if (machine) {
         await db.transaction(async (tx) => {
           await tx
@@ -141,6 +153,9 @@ export async function POST(request: Request) {
               ...(repositories && { repositories }),
               ...(sessions && { sessions }),
               ...(worktrees && { worktrees }),
+              ...((capabilities || repositories) && {
+                capabilities: capabilities ?? [],
+              }),
             })
             .where(eq(machines.id, machine.id));
           if (repositories)

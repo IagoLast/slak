@@ -127,12 +127,20 @@ function clean(value, depth = 0) {
     );
   return value;
 }
-export function publicEvents(items, generation) {
+export function publicEvents(
+  items,
+  generation,
+  { includeUserMessages = false, excludedUserItemIds = [] } = {},
+) {
   return items
     .filter(
       (i) =>
         visibleKinds.has(i.body?.kind) &&
-        !(i.body.kind === "message" && i.body.role === "user") &&
+        !(
+          i.body.kind === "message" &&
+          i.body.role === "user" &&
+          (!includeUserMessages || excludedUserItemIds.includes(i.itemId))
+        ) &&
         !(
           i.body.kind === "status" &&
           i.body.providerFrame &&

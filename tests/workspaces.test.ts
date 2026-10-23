@@ -34,6 +34,8 @@ const machine: SharedMachine = {
 const thread: WorkThreadSummary = {
   workers: [],
   id: "thread",
+  sessionId: "parent",
+  closedAt: null,
   title: "Review",
   channelId: "channel",
   rootMessageId: "root",
@@ -80,4 +82,38 @@ test("guest navigation includes only worktrees from authorized conversations", (
 test("orchestrator conversations without a worktree remain reachable", () => {
   const groups = workspaceGroups([machine], [{ ...thread, worktree: null }]);
   assert.equal(groups[0].repositories[0].unassigned[0].id, thread.id);
+});
+
+test("a worker worktree links to its own session, independently of its parent", () => {
+  const groups = workspaceGroups(
+    [machine],
+    [
+      {
+        ...thread,
+        worktree: null,
+        state: "idle",
+        workers: [
+          {
+            id: "worker",
+            name: "Frontend",
+            worktree: "path:/repo/feature",
+            state: "running",
+            closedAt: null,
+          },
+        ],
+      },
+    ],
+  );
+  const target = groups[0].repositories[0].worktrees[0].threads[0];
+  assert.equal(target.sessionId, "worker");
+  assert.equal(target.state, "running");
+});
+
+test("closed worktrees do not reappear from retained conversation history", () => {
+  const groups = workspaceGroups(
+    [{ ...machine, worktrees: [], sessions: [] }],
+    [{ ...thread, closedAt: "2026-10-23T14:00:00Z" }],
+  );
+  assert.deepEqual(groups[0].repositories[0].worktrees, []);
+  assert.deepEqual(groups[0].repositories[0].unassigned, []);
 });

@@ -5,6 +5,7 @@ import { z } from "zod";
 import { db } from "@/db";
 import {
   agents,
+  agentTasks,
   channelMembers,
   machines,
   messages,
@@ -17,7 +18,7 @@ import {
 } from "@/db/schema";
 import { getAccessibleChannel } from "@/lib/channels";
 import { getSessionUser } from "@/lib/session";
-import { queueWorkAction } from "@/lib/work";
+import { assertWorktreeNotClosing, queueWorkAction } from "@/lib/work";
 
 async function access(id: string) {
   const user = await getSessionUser();
@@ -48,6 +49,7 @@ export async function GET(
       role: workSessions.role,
       parentId: workSessions.parentId,
       worktree: workSessions.worktree,
+      closedAt: workSessions.closedAt,
       state: workSessions.state,
       memory: workSessions.memory,
       memoryVersion: workSessions.memoryVersion,
@@ -59,7 +61,14 @@ export async function GET(
     .from(workSessions)
     .where(eq(workSessions.threadId, thread.id))
     .orderBy(asc(workSessions.createdAt));
-  const selected = sessions.find((s) => s.role === "orchestrator")!;
+  const selected = query.has("session")
+    ? sessions.find((s) => s.id === query.get("session"))
+    : sessions.find((s) => s.role === "orchestrator");
+  if (!selected)
+    return NextResponse.json(
+      { error: "Sesión no encontrada" },
+      { status: 404 },
+    );
   const cursorSchema = z.object({
     at: z.iso.datetime(),
     id: z.string().max(4096),
@@ -107,14 +116,26 @@ export async function GET(
       .select({
         id: workTurns.id,
         prompt: workTurns.prompt,
-        result: workTurns.result,
+        result: sql<
+          string | null
+        >`coalesce(${agentTasks.result}, ${workTurns.result})`,
         kind: workTurns.kind,
-        status: workTurns.status,
+        status: sql<
+          typeof workTurns.$inferSelect.status
+        >`coalesce(${agentTasks.status}, ${workTurns.status})`,
         createdAt: workTurns.createdAt,
         author: users.name,
       })
       .from(workTurns)
       .innerJoin(users, eq(users.id, workTurns.userId))
+      .leftJoin(
+        agentTasks,
+        and(
+          eq(agentTasks.id, workTurns.id),
+          eq(agentTasks.messageId, workTurns.messageId),
+          eq(agentTasks.agentId, thread.agentId),
+        ),
+      )
       .where(
         and(
           eq(workTurns.sessionId, selected.id),
@@ -136,9 +157,13 @@ export async function GET(
     db
       .select({
         handle: agents.handle,
+        mode: agents.mode,
         name: users.name,
         state: agents.state,
         machine: machines.name,
+        machineOwnerId: machines.ownerId,
+        capabilities: machines.capabilities,
+        worktrees: machines.worktrees,
         lastSeenAt: machines.lastSeenAt,
         enabled: sql<boolean>`${machines.tokenHash} is not null`,
       })
@@ -174,7 +199,7 @@ export async function GET(
           ),
         )
     : [];
-  const childIds = sessions
+  const childIds = (selected.role === "orchestrator" ? sessions : [])
     .filter((session) => session.role === "worker")
     .map((session) => session.id);
   const childRequests = childIds.length
@@ -191,8 +216,22 @@ export async function GET(
         .orderBy(asc(workEvents.observedAt))
         .limit(100)
     : [];
+  if (bot[0]?.mode === "session" && !selected.closedAt)
+    selected.state = turns.some((turn) => turn.status === "running")
+      ? "running"
+      : "idle";
+  const { worktrees: catalog, ...botInfo } = bot[0] ?? {};
+  const workspace = catalog?.find(
+    (tree) =>
+      tree.worktree ===
+      (selected.worktree ||
+        (selected.role === "orchestrator" ? thread.worktree : null)),
+  );
   return NextResponse.json({
     thread,
+    workspace: workspace
+      ? { name: workspace.name, branch: workspace.branch }
+      : null,
     sessions,
     selectedId: selected.id,
     events: [
@@ -207,13 +246,26 @@ export async function GET(
     actions,
     childRequests,
     bot: {
-      ...bot[0],
+      ...botInfo,
       online:
         !!bot[0]?.enabled &&
         !!bot[0]?.lastSeenAt &&
         bot[0].lastSeenAt.getTime() > Date.now() - 60000,
     },
-    canSend: !!membership && !!bot[0]?.enabled && bot[0]?.state === "ready",
+    canSend:
+      !selected.closedAt &&
+      !!membership &&
+      !!bot[0]?.enabled &&
+      bot[0]?.state === "ready",
+    canManage: found.user.role !== "guest" && bot[0]?.mode === "orchestrator",
+    canCloseWorktree:
+      !selected.closedAt &&
+      !!bot[0]?.capabilities?.includes("worktree-close.v1") &&
+      !!(
+        selected.worktree ||
+        (selected.role === "orchestrator" ? thread.worktree : null)
+      ) &&
+      (found.user.role === "admin" || found.user.id === bot[0]?.machineOwnerId),
     hasOlder: events.length > 200 || turns.length > 100,
     next: {
       events:
@@ -240,7 +292,13 @@ const command = z.discriminatedUnion("action", [
     requestId: z.string().min(16).max(100),
   }),
   z.object({
-    action: z.enum(["stop", "compact", "rotate", "workspace"]),
+    action: z.enum([
+      "stop",
+      "compact",
+      "rotate",
+      "workspace",
+      "close-worktree",
+    ]),
     sessionId: z.string().min(1),
   }),
   z
@@ -306,24 +364,59 @@ export async function POST(
       { error: "Sesión no encontrada" },
       { status: 404 },
     );
-  if (session.role !== "orchestrator" && body.action !== "respond")
+  if (session.role !== "orchestrator" && body.action === "workspace")
     return NextResponse.json(
       {
-        error:
-          "Habla con el agente padre del proyecto; él coordina a los subagentes.",
+        error: "El subagente ya trabaja en su propio worktree.",
       },
       { status: 400 },
     );
   try {
+    if (session.closedAt) throw new Error("Este worktree está cerrado.");
+    if (body.action === "close-worktree") {
+      const machine = bot?.machineId
+        ? await db.query.machines.findFirst({
+            where: eq(machines.id, bot.machineId),
+          })
+        : null;
+      if (!machine || (user.role !== "admin" && user.id !== machine.ownerId))
+        return NextResponse.json(
+          {
+            error:
+              "Solo el propietario de la máquina o un administrador puede cerrar worktrees.",
+          },
+          { status: 403 },
+        );
+      const worktree =
+        session.worktree ||
+        (session.role === "orchestrator" ? thread.worktree : null);
+      if (!worktree)
+        throw new Error("Esta conversación no tiene un worktree asignado.");
+      return NextResponse.json(
+        await queueWorkAction(session.id, "close-worktree", { worktree }),
+      );
+    }
     if (body.action === "message") {
       if (session.state === "stopped")
         throw new Error("Reanuda la conversación antes de enviar un mensaje.");
       await db.transaction(async (tx) => {
-        await tx
-          .select({ id: workSessions.id })
+        const [current] = await tx
+          .select()
           .from(workSessions)
           .where(eq(workSessions.id, session.id))
           .for("update");
+        if (current.closedAt || current.state === "stopped")
+          throw new Error("La sesión está cerrada o detenida.");
+        await assertWorktreeNotClosing(tx, session.id);
+        const pending = await tx.query.workActions.findFirst({
+          where: and(
+            eq(workActions.sessionId, session.id),
+            inArray(workActions.kind, ["stop", "rotate", "close-worktree"]),
+            inArray(workActions.status, ["queued", "running"]),
+          ),
+        });
+        if (pending)
+          throw new Error("Espera a que termine la operación pendiente.");
         const [existing] = await tx
           .select()
           .from(workTurns)
@@ -335,6 +428,32 @@ export async function POST(
             existing.prompt !== body.content
           )
             throw new Error("Identificador de envío ya utilizado.");
+          return;
+        }
+        if (bot.mode === "session") {
+          await tx.insert(messages).values({
+            id: messageIdForTerminal(body.requestId),
+            channelId: thread.channelId,
+            parentId: thread.rootMessageId,
+            userId: user.id,
+            content: body.content,
+          });
+          await tx.insert(workTurns).values({
+            id: body.requestId,
+            sessionId: session.id,
+            userId: user.id,
+            messageId: messageIdForTerminal(body.requestId),
+            prompt: body.content,
+          });
+          await tx.insert(agentTasks).values({
+            id: body.requestId,
+            agentId: bot.id,
+            channelId: thread.channelId,
+            messageId: messageIdForTerminal(body.requestId),
+            prompt: body.content,
+            kind: "message",
+            createdBy: user.id,
+          });
           return;
         }
         const messageId = nanoid();
@@ -358,11 +477,15 @@ export async function POST(
     }
     if (
       user.role === "guest" &&
-      ["stop", "rotate", "workspace"].includes(body.action)
+      ["stop", "compact", "rotate", "workspace"].includes(body.action)
     )
       return NextResponse.json(
         { error: "Solo los miembros pueden gestionar sesiones." },
         { status: 403 },
+      );
+    if (bot.mode === "session")
+      throw new Error(
+        "Esta sesión de terminal se gestiona desde Orca. Puedes cerrar el worktree desde Slak.",
       );
     if (body.action === "respond") {
       const event = await db.query.workEvents.findFirst({
@@ -396,4 +519,8 @@ export async function POST(
   } catch (e) {
     return NextResponse.json({ error: (e as Error).message }, { status: 409 });
   }
+}
+
+function messageIdForTerminal(requestId: string) {
+  return `work-${requestId}`;
 }

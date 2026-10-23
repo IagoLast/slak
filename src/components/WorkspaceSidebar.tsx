@@ -18,7 +18,11 @@ import {
   WorkThreadSummary,
 } from "@/lib/client";
 import { Button } from "@/components/ui/button";
-import { workspaceGroups, workspaceStatusLabel } from "@/lib/workspaces";
+import {
+  workspaceGroups,
+  workspaceStatusLabel,
+  workSessionHref,
+} from "@/lib/workspaces";
 import { workStateLabels } from "@/components/WorkList";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
@@ -138,7 +142,7 @@ export default function WorkspaceSidebar({
                     <Bot className="size-4 shrink-0" />
                     <span className="min-w-0 text-left">
                       <span className="block truncate text-xs">
-                        Hablar con el agente padre
+                        Agente padre
                       </span>
                       <span className="block truncate text-[10px] font-normal text-muted-foreground">
                         @{agent.handle}
@@ -150,7 +154,13 @@ export default function WorkspaceSidebar({
                 {repo.worktrees.map((tree) => {
                   const active =
                     tree.threads.some(
-                      (thread) => pathname === `/work/${thread.id}`,
+                      (thread) =>
+                        pathname === `/work/${thread.id}` &&
+                        (query.get("session")
+                          ? query.get("session") === thread.sessionId
+                          : !thread.workers.some(
+                              (worker) => worker.id === thread.sessionId,
+                            )),
                     ) ||
                     (pathname === "/work" &&
                       query.get("machineId") === machine.id &&
@@ -164,7 +174,10 @@ export default function WorkspaceSidebar({
                   ].find((value) =>
                     tree.threads.some((thread) => thread.state === value),
                   ) as WorkThreadSummary["state"] | undefined;
-                  const href = `/work?${new URLSearchParams({ machineId: machine.id, worktree: tree.worktree })}`;
+                  const first = tree.threads[0];
+                  const href = first
+                    ? workSessionHref(first.id, first.sessionId)
+                    : `/work?${new URLSearchParams({ machineId: machine.id, worktree: tree.worktree })}`;
                   return (
                     <li key={tree.worktree}>
                       <Link
@@ -200,13 +213,17 @@ export default function WorkspaceSidebar({
                           </span>
                         </span>
                       </Link>
-                      {tree.threads.length > 0 && (
+                      {tree.threads.length > 1 && (
                         <ul className="ml-4 border-l pl-1">
                           {tree.threads.map((thread) => (
                             <ThreadLink
                               key={thread.id}
                               thread={thread}
-                              active={pathname === `/work/${thread.id}`}
+                              active={
+                                pathname === `/work/${thread.id}` &&
+                                (!query.get("session") ||
+                                  query.get("session") === thread.sessionId)
+                              }
                               onNavigate={onNavigate}
                             />
                           ))}
@@ -225,7 +242,11 @@ export default function WorkspaceSidebar({
                         <ThreadLink
                           key={thread.id}
                           thread={thread}
-                          active={pathname === `/work/${thread.id}`}
+                          active={
+                            pathname === `/work/${thread.id}` &&
+                            (!query.get("session") ||
+                              query.get("session") === thread.sessionId)
+                          }
                           onNavigate={onNavigate}
                         />
                       ))}
@@ -253,7 +274,7 @@ function ThreadLink({
   return (
     <li>
       <Link
-        href={`/work/${thread.id}`}
+        href={workSessionHref(thread.id, thread.sessionId)}
         onClick={onNavigate}
         aria-current={active ? "page" : undefined}
         className={cn(

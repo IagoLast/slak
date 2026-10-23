@@ -6,6 +6,8 @@ export type SharedWorktree = {
   repository: string;
   branch: string;
   status: string;
+  identity?: string;
+  nativeSessions?: { id: string; name: string; provider: "codex" | "claude" }[];
 };
 
 export function worktreeName(worktree: string) {
@@ -24,6 +26,7 @@ export function workspaceStatusLabel(status: string) {
     "in-progress": "En curso",
     "in-review": "En revisión",
     done: "Completado",
+    completed: "Completado",
     cancelled: "Cancelado",
   };
   return labels[status] || status || "Sin estado";
@@ -55,8 +58,10 @@ export function workspaceGroups(
       }
       for (const thread of machineThreads) {
         for (const path of [
-          thread.worktree,
-          ...(thread.workers ?? []).map((worker) => worker.worktree),
+          !thread.closedAt && thread.worktree,
+          ...(thread.workers ?? [])
+            .filter((worker) => !worker.closedAt)
+            .map((worker) => worker.worktree),
         ]) {
           if (path && !worktrees.has(path))
             worktrees.set(path, {
@@ -87,22 +92,30 @@ export function workspaceGroups(
               threads: machineThreads
                 .filter(
                   (thread) =>
-                    thread.worktree === tree.worktree ||
+                    (!thread.closedAt && thread.worktree === tree.worktree) ||
                     thread.workers?.some(
-                      (worker) => worker.worktree === tree.worktree,
+                      (worker) =>
+                        !worker.closedAt && worker.worktree === tree.worktree,
                     ),
                 )
                 .map((thread) => ({
                   ...thread,
+                  sessionId:
+                    thread.workers?.find(
+                      (worker) =>
+                        !worker.closedAt && worker.worktree === tree.worktree,
+                    )?.id ?? thread.sessionId,
                   state:
                     thread.workers?.find(
-                      (worker) => worker.worktree === tree.worktree,
+                      (worker) =>
+                        !worker.closedAt && worker.worktree === tree.worktree,
                     )?.state ?? thread.state,
                 })),
             })),
           unassigned: machineThreads.filter(
             (thread) =>
               thread.repository === id &&
+              !thread.closedAt &&
               !thread.worktree &&
               !thread.workers?.some((worker) => worker.worktree),
           ),
@@ -110,4 +123,8 @@ export function workspaceGroups(
       };
     })
     .filter((group) => includeCatalog || group.repositories.length);
+}
+
+export function workSessionHref(threadId: string, sessionId?: string) {
+  return `/work/${threadId}${sessionId ? `?${new URLSearchParams({ session: sessionId })}` : ""}`;
 }
