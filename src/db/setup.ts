@@ -166,10 +166,22 @@ const SCHEMA_VERSION = STATEMENTS.length;
 let pending: Promise<void> | null = null;
 
 /**
- * Crea/actualiza el esquema si hace falta. En caliente solo cuesta una
- * consulta a schema_info; tras un deploy con cambios ejecuta el DDL una vez.
+ * Crea/actualiza el esquema si hace falta. Comparte la promesa entre peticiones;
+ * tras un deploy con cambios ejecuta el DDL una vez por base de datos.
  */
 export function ensureSchema(force = false): Promise<void> {
+  // Una petición de reparación debe ejecutar el DDL incluso si este proceso
+  // ya comprobó la versión. Espera primero cualquier migración en curso.
+  if (force) {
+    pending = (pending ?? Promise.resolve())
+      .catch(() => {})
+      .then(() => run(true))
+      .catch((e) => {
+        pending = null;
+        throw e;
+      });
+    return pending;
+  }
   pending ??= run(force).catch((e) => {
     pending = null; // permitir reintento en la siguiente petición
     throw e;
@@ -178,20 +190,25 @@ export function ensureSchema(force = false): Promise<void> {
 }
 
 async function run(force: boolean) {
-  await db.execute(
-    sql`CREATE TABLE IF NOT EXISTS "schema_info" ("id" int PRIMARY KEY, "version" int NOT NULL)`,
-  );
-  if (!force) {
-    const rows = await db.execute<{ version: number }>(
-      sql`SELECT "version" FROM "schema_info" WHERE "id" = 1`,
+  await db.transaction(async (tx) => {
+    // Los cold starts pueden coincidir. Serializa el DDL entre instancias y
+    // publica la versión solo cuando todas las sentencias se hayan aplicado.
+    await tx.execute(sql`SELECT pg_advisory_xact_lock(1936482667, 1)`);
+    await tx.execute(
+      sql`CREATE TABLE IF NOT EXISTS "schema_info" ("id" int PRIMARY KEY, "version" int NOT NULL)`,
     );
-    if (rows.length > 0 && rows[0].version >= SCHEMA_VERSION) return;
-  }
-  for (const statement of STATEMENTS) {
-    await db.execute(statement);
-  }
-  await db.execute(
-    sql`INSERT INTO "schema_info" ("id", "version") VALUES (1, ${SCHEMA_VERSION})
-        ON CONFLICT ("id") DO UPDATE SET "version" = ${SCHEMA_VERSION}`,
-  );
+    if (!force) {
+      const rows = await tx.execute<{ version: number }>(
+        sql`SELECT "version" FROM "schema_info" WHERE "id" = 1`,
+      );
+      if (rows.length > 0 && rows[0].version >= SCHEMA_VERSION) return;
+    }
+    for (const statement of STATEMENTS) {
+      await tx.execute(statement);
+    }
+    await tx.execute(
+      sql`INSERT INTO "schema_info" ("id", "version") VALUES (1, ${SCHEMA_VERSION})
+          ON CONFLICT ("id") DO UPDATE SET "version" = ${SCHEMA_VERSION}`,
+    );
+  });
 }

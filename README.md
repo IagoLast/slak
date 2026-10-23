@@ -209,6 +209,13 @@ Pruebas de concurrencia y aislamiento MCP contra una base de pruebas independien
 SLAK_TEST_DATABASE=1 DATABASE_URL=postgres://.../slak_work_checks npx tsx --test tests/work.test.ts
 ```
 
+Regresión del registro durante una migración pendiente (Postgres local con permiso
+para crear bases; crea y elimina su propia base temporal):
+
+```bash
+SLAK_TEST_DATABASE=1 DATABASE_URL=postgres://...@127.0.0.1:54329/slak npx tsx --test tests/registration.test.ts
+```
+
 Crean y eliminan sus propios fixtures. El smoke nativo se validó además en una base
 local aislada: mención → herramientas → respuesta → memoria → worker → intervención
 directa → notificación al padre; también se revisaron escritorio y móvil.

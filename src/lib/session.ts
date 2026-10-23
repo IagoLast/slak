@@ -1,4 +1,5 @@
 import { auth } from "@/auth";
+import { ensureSchema } from "@/db/setup";
 import { redirect } from "next/navigation";
 
 export type SessionUser = {
@@ -11,6 +12,7 @@ export type SessionUser = {
 export async function getSessionUser(): Promise<SessionUser | null> {
   const session = await auth();
   if (!session?.user?.id) return null;
+  await ensureSchema();
   return {
     id: session.user.id,
     name: session.user.name ?? "",

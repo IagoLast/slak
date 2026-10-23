@@ -3,6 +3,7 @@ import { eq, sql } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { NextResponse } from "next/server";
 import { db } from "@/db";
+import { ensureSchema } from "@/db/setup";
 import { channelMembers, channels, invites, users } from "@/db/schema";
 
 /**
@@ -23,6 +24,16 @@ export async function POST(req: Request) {
     return NextResponse.json(
       { error: "Nombre, email y contraseña (mínimo 8 caracteres) son obligatorios." },
       { status: 400 },
+    );
+  }
+
+  try {
+    await ensureSchema();
+  } catch (error) {
+    console.error("No se pudo preparar la base de datos para el registro:", error);
+    return NextResponse.json(
+      { error: "No se pudo preparar el registro. Inténtalo de nuevo en unos segundos." },
+      { status: 503 },
     );
   }
 

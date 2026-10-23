@@ -4,6 +4,7 @@ import { and, asc, desc, eq, inArray, isNull, or } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { z } from "zod";
 import { db } from "@/db";
+import { ensureSchema } from "@/db/setup";
 import {
   agents,
   agentTasks,
@@ -41,6 +42,7 @@ export async function POST(request: Request) {
       status: 401,
       headers: { "WWW-Authenticate": "Bearer" },
     });
+  await ensureSchema();
   const agent = await authenticateAgent(request);
   const machine = agent
     ? null

@@ -21,20 +21,29 @@ function RegisterForm() {
     e.preventDefault();
     setError(null);
     setLoading(true);
-    const res = await fetch("/api/register", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name, email, password, token }),
-    });
-    if (!res.ok) {
-      const data = await res.json().catch(() => null);
-      setError(data?.error ?? "No se pudo crear la cuenta.");
+    try {
+      const res = await fetch("/api/register", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name, email, password, token }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => null);
+        setError(data?.error ?? "No se pudo crear la cuenta. Inténtalo de nuevo.");
+        return;
+      }
+      const result = await signIn("credentials", { email, password, redirect: false });
+      if (!result?.ok || result.error) {
+        setError("Tu cuenta se ha creado, pero no se pudo iniciar sesión. Usa el enlace «Inicia sesión».");
+        return;
+      }
+      router.push("/");
+      router.refresh();
+    } catch {
+      setError("No se pudo conectar con el servidor. Inténtalo de nuevo.");
+    } finally {
       setLoading(false);
-      return;
     }
-    await signIn("credentials", { email, password, redirect: false });
-    router.push("/");
-    router.refresh();
   }
 
   return (
