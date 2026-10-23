@@ -40,6 +40,18 @@ export function visibleWorkEvents(events: WorkEvent[], view: ConversationView) {
   }
   return events.filter((event) => {
     const body = event.body;
+    if (body.kind === "message" && body.role === "user") {
+      if (body.slakTurnId) return false;
+      const text = Array.isArray(body.blocks)
+        ? body.blocks
+            .map((b) => b?.text || "")
+            .join("\n\n")
+            .trim()
+            .replace(/^<pasted_content\b[^>]*>\s*/, "")
+        : "";
+      if (text.startsWith("Has recibido trabajo de tu equipo a través de Slak"))
+        return false;
+    }
     if (body.kind === "turn") return false;
     if (view === "activity") return true;
     if (body.kind === "approval" || body.kind === "question") return true;
@@ -48,7 +60,8 @@ export function visibleWorkEvents(events: WorkEvent[], view: ConversationView) {
     if (body.kind !== "message" || body.agentId || !hasText(body)) return false;
     if (body.role === "user") return true;
     if (view === "messages") return true;
-    if (body.source === "orca-terminal" && body.phase === "commentary") return false;
+    if (body.source === "orca-terminal" && body.phase === "commentary")
+      return false;
     // Old events without turn metadata remain readable; do not guess which
     // text was a final response from timestamps or the message's wording.
     if (typeof body.turnId !== "string") return true;

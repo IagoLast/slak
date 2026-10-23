@@ -39,7 +39,9 @@ export async function openWorktreeChat(
           eq(agents.machineId, machineId),
           sql`coalesce(${workSessions.worktree}, case when ${workSessions.role} = 'orchestrator' then ${workThreads.worktree} end) = ${worktree}`,
           sql`${workSessions.closedAt} is null`,
-          runtimeId ? eq(workSessions.runtimeId, runtimeId) : undefined,
+          runtimeId
+            ? sql`(${workSessions.runtimeId} = ${runtimeId} or (${agents.mode} = 'session' and ${agents.runtimeHandle} = ${runtimeId}))`
+            : undefined,
         ),
       )
       .orderBy(asc(workSessions.createdAt));
@@ -89,7 +91,14 @@ export async function openWorktreeChat(
     const native = runtimeId
       ? tree.nativeSessions?.find((s) => s.id === runtimeId)
       : tree.nativeSessions?.[0];
-    if (runtimeId && !native)
+    const terminal = !native
+      ? machine.sessions.find(
+          (session) =>
+            session.worktree === worktree &&
+            (!runtimeId || session.runtimeHandle === runtimeId),
+        )
+      : null;
+    if (runtimeId && !native && !terminal)
       throw new Error(
         "La sesión ya no está disponible. Actualiza el worktree.",
       );
@@ -112,16 +121,13 @@ export async function openWorktreeChat(
           "Esta sesión ya está vinculada a otra conversación de Slak.",
         );
     }
-    const terminal = !native
-      ? machine.sessions.find((session) => session.worktree === worktree)
-      : null;
     // Internal transport identity, created only when opening a session.
     // Native sessions need no project parent or orchestration setup.
     let bot = terminal
       ? await tx.query.agents.findFirst({
           where: and(
             eq(agents.machineId, machineId),
-            eq(agents.worktree, worktree),
+            eq(agents.runtimeHandle, terminal.runtimeHandle),
             eq(agents.mode, "session"),
           ),
         })
@@ -144,7 +150,7 @@ export async function openWorktreeChat(
           mode: terminal ? "session" : "orchestrator",
           machineId,
           repository: tree.repository,
-          worktree: terminal ? worktree : "",
+          worktree: "",
           machine: machine.name,
           runtimeHandle: terminal?.runtimeHandle,
           provider: native?.provider || terminal?.provider || "codex",
@@ -195,9 +201,9 @@ export async function openWorktreeChat(
       role: "orchestrator",
       name: native?.name || terminal?.name || "Nueva conversación",
       worktree,
-      runtimeId: native?.id,
-      imported: !!native,
-      provider: native?.provider,
+      runtimeId: native?.id || terminal?.runtimeHandle,
+      imported: !!native || !!terminal,
+      provider: native?.provider || terminal?.provider,
     });
     return { threadId, sessionId };
   });
@@ -215,6 +221,8 @@ export async function listWorktreeChats(
   const rows = await db
     .select({
       session: workSessions,
+      mode: agents.mode,
+      runtimeHandle: agents.runtimeHandle,
       thread: workThreads,
       channel: channels,
       accessible: sql<boolean>`(${channels.type} = 'public' and ${user.role !== "guest"}) or exists (select 1 from channel_members cm where cm.channel_id = ${channels.id} and cm.user_id = ${user.id})`,
@@ -237,15 +245,27 @@ export async function listWorktreeChats(
   if (!accessible.length && (!tree || user.role === "guest"))
     throw new Error("Worktree no disponible.");
   const bound = new Set(
-    rows.map(({ session }) => session.runtimeId).filter(Boolean),
+    rows
+      .flatMap(({ session, mode, runtimeHandle }) => [
+        session.runtimeId,
+        mode === "session" ? runtimeHandle : null,
+      ])
+      .filter(Boolean),
   );
   const sessions = [
-    ...accessible.map(({ session, thread }) => ({
-      id: session.runtimeId ? `native:${session.runtimeId}` : session.id,
+    ...accessible.map(({ session, thread, mode, runtimeHandle }) => ({
+      id:
+        mode === "session" && runtimeHandle
+          ? `terminal:${runtimeHandle}`
+          : session.runtimeId
+            ? `native:${session.runtimeId}`
+            : session.id,
       threadId: thread.id,
       sessionId: session.id,
       runtimeId: session.runtimeId,
-      name: session.name,
+      name:
+        machine.sessions.find((entry) => entry.runtimeHandle === runtimeHandle)
+          ?.name || session.name,
       state: session.state,
     })),
     ...(user.role !== "guest" && machine.tokenHash
@@ -258,6 +278,19 @@ export async function listWorktreeChats(
         runtimeId: session.id,
         name:
           session.name || (session.provider === "claude" ? "Claude" : "Codex"),
+        state: "idle" as const,
+        threadId: null,
+        sessionId: null,
+      })),
+    ...(user.role !== "guest" && machine.tokenHash ? machine.sessions : [])
+      .filter(
+        (session) =>
+          session.worktree === worktree && !bound.has(session.runtimeHandle),
+      )
+      .map((session) => ({
+        id: `terminal:${session.runtimeHandle}`,
+        runtimeId: session.runtimeHandle,
+        name: session.name || session.provider,
         state: "idle" as const,
         threadId: null,
         sessionId: null,

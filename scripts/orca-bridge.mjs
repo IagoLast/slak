@@ -153,16 +153,21 @@ export async function discover(
         "--limit",
         "100",
       ]);
-      const terminal = terminals.find(
+      const agentTerminals = terminals.filter(
         (t) =>
           ["codex", "claude"].includes(t.agentIdentity) &&
           t.connected &&
           t.writable,
       );
-      if (terminal)
+      for (const terminal of agentTerminals)
         sessions.push({
           worktree: `path:${wt.path}`,
-          name: (wt.displayName || wt.branch || wt.path).slice(0, 100),
+          name: (
+            terminal.title ||
+            wt.displayName ||
+            wt.branch ||
+            wt.path
+          ).slice(0, 100),
           repository: `id:${repo.id}`,
           provider: terminal.agentIdentity,
           runtimeHandle: terminal.handle,
@@ -400,12 +405,12 @@ async function main() {
     do {
       let stopHeartbeat;
       try {
-        client ??= await connect(config);
-        const identity = await call(client, "heartbeat");
-        if (identity.kind !== "machine")
-          throw new Error(
-            "Usa la configuración de una máquina compartida, no la de un agente externo.",
-          );
+        if (!client) {
+          client = await connect(config);
+          const identity = await call(client, "heartbeat");
+          if (identity.kind !== "machine")
+            throw new Error("Usa la configuración de una máquina compartida.");
+        }
         stopHeartbeat = keepMachineOnline(client);
         if (!catalog || Date.now() - lastDiscovery > 30_000) {
           native ??= await loadNativeRuntime().catch(() => null);
@@ -419,18 +424,26 @@ async function main() {
             native,
           );
           lastDiscovery = Date.now();
+          await call(client, "heartbeat", {
+            ...catalog,
+            capabilities: native
+              ? [
+                  "worktree-chat.v1",
+                  "worktree-close.v1",
+                  "session-interrupt.v1",
+                  "terminal-chat.v2",
+                ]
+              : [],
+          });
         }
-        await call(client, "heartbeat", {
-          ...catalog,
-          capabilities: native
-            ? ["worktree-chat.v1", "worktree-close.v1", "session-interrupt.v1"]
-            : [],
-        });
         if (!announced) {
           console.log("Máquina conectada a Slak. Ya puedes volver a la app.");
           announced = true;
         }
-        const { commands } = await call(client, "list_commands");
+        const [{ commands }, { tasks }] = await Promise.all([
+          call(client, "list_commands"),
+          call(client, "list_tasks"),
+        ]);
         // Commands first, so a stop fences work before another prompt can be dispatched.
         for (const entry of commands) {
           const id = entry.command.id;
@@ -481,7 +494,6 @@ async function main() {
           lastDiscovery = 0;
         }
         await workTick(client, catalog);
-        const { tasks } = await call(client, "list_tasks");
         const running = new Set(
           tasks.filter((t) => t.status === "running").map((t) => t.agentId),
         );
@@ -544,7 +556,7 @@ async function main() {
       } finally {
         stopHeartbeat?.();
       }
-      if (!stopped) await new Promise((r) => setTimeout(r, 4000));
+      if (!stopped) await new Promise((r) => setTimeout(r, 1500));
     } while (!stopped);
   } finally {
     await client?.close();

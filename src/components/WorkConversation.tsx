@@ -1,6 +1,6 @@
 "use client";
 import Link from "next/link";
-import { useEffect, useRef, useState } from "react";
+import { type ReactNode, useEffect, useRef, useState } from "react";
 import useSWR from "swr";
 import {
   Archive,
@@ -41,16 +41,13 @@ import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 
@@ -70,6 +67,7 @@ export default function WorkConversation({
   sessionId,
   compact = false,
   embedded = false,
+  navigation,
   draft: controlledDraft,
   onDraftChange,
   onClose,
@@ -78,6 +76,7 @@ export default function WorkConversation({
   sessionId?: string;
   compact?: boolean;
   embedded?: boolean;
+  navigation?: ReactNode;
   draft?: string;
   onDraftChange?: (draft: string) => void;
   onClose?: () => void;
@@ -209,12 +208,21 @@ export default function WorkConversation({
     );
   if (!data || !session)
     return (
-      <div className="space-y-4 p-6">
-        <Skeleton className="h-12" />
-        <Skeleton className="h-48" />
+      <div className="flex min-h-0 flex-1 flex-col">
+        {navigation && (
+          <header className="flex h-12 items-center border-b px-3">
+            {navigation}
+          </header>
+        )}
+        <div className="space-y-4 p-6">
+          <Skeleton className="h-12" />
+          <Skeleton className="h-48" />
+        </div>
       </div>
     );
   const online = data.bot.online;
+  const awaitingHistory =
+    !session.lastSeenAt && (data.bot.mode === "session" || !!session.runtimeId);
   const worktree =
     session.worktree ||
     (session.role === "orchestrator" ? data.thread.worktree : null);
@@ -225,7 +233,8 @@ export default function WorkConversation({
   const lastFailure = data.actions.find((a) => a.status === "failed");
   return (
     <div className="flex h-full min-h-0 flex-1 flex-col bg-background">
-      <header className="flex flex-wrap items-center gap-2 border-b px-4 py-2 sm:px-5">
+      <header className="flex min-h-12 shrink-0 items-center gap-2 border-b px-3 py-1">
+        {navigation}
         {!embedded && (
           <>
             <MessageSquare className="size-5 shrink-0 text-primary" />
@@ -235,32 +244,23 @@ export default function WorkConversation({
                   (worktree ? worktreeName(worktree) : data.thread.title)}
               </h1>
               <p className="flex items-center gap-1 text-xs text-muted-foreground">
-                {session.name} · <Server className="size-3" /> {data.bot.machine}
+                {session.name} · <Server className="size-3" />{" "}
+                {data.bot.machine}
               </p>
             </div>
           </>
         )}
-        <Badge variant={session.state === "error" ? "destructive" : "secondary"}>
+        <Badge
+          className="hidden shrink-0 sm:inline-flex"
+          variant={session.state === "error" ? "destructive" : "secondary"}
+        >
           {session.closedAt
             ? "Worktree cerrado"
-            : online ? workStateLabels[session.state] : "Sin conexión"}
+            : online
+              ? workStateLabels[session.state]
+              : "Sin conexión"}
         </Badge>
-        <Select value={view} onValueChange={setView}>
-          <SelectTrigger
-            className="ml-auto"
-            size="sm"
-            aria-label="Vista de la conversación"
-          >
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent align="end">
-            {conversationViews.map((option) => (
-              <SelectItem key={option.value} value={option.value}>
-                {option.label}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+
         {data.canManage && ["running", "waiting"].includes(session.state) && (
           <Button
             variant="outline"
@@ -324,7 +324,16 @@ export default function WorkConversation({
               <MoreHorizontal className="size-4" />
             </Button>
           </DropdownMenuTrigger>
-          <DropdownMenuContent align="end">
+          <DropdownMenuContent align="end" className="w-56">
+            <DropdownMenuLabel>Mostrar</DropdownMenuLabel>
+            <DropdownMenuRadioGroup value={view} onValueChange={setView}>
+              {conversationViews.map((option) => (
+                <DropdownMenuRadioItem key={option.value} value={option.value}>
+                  {option.label}
+                </DropdownMenuRadioItem>
+              ))}
+            </DropdownMenuRadioGroup>
+            <DropdownMenuSeparator />
             {data.canCloseWorktree && (
               <DropdownMenuItem
                 disabled={busy || !!activeAction || !online}
@@ -335,40 +344,45 @@ export default function WorkConversation({
               </DropdownMenuItem>
             )}
 
-            <DropdownMenuItem
-              disabled={
-                busy ||
-                !!activeAction ||
-                !data.canSend ||
-                !data.canManage ||
-                ["running", "waiting"].includes(session.state)
-              }
-              onSelect={() =>
-                void command({
-                  action: "compact",
-                  sessionId: session.id,
-                }).catch(() => {})
-              }
-            >
-              Compactar contexto
-            </DropdownMenuItem>
-            <DropdownMenuItem
-              disabled={
-                busy ||
-                !!activeAction ||
-                !data.canSend ||
-                !data.canManage ||
-                session.state === "stopped"
-              }
-              onSelect={() =>
-                void command({ action: "stop", sessionId: session.id }).catch(
-                  () => {},
-                )
-              }
-            >
-              <Square className="size-3.5" />
-              Detener esta sesión
-            </DropdownMenuItem>
+            {data.bot.mode !== "session" && (
+              <>
+                <DropdownMenuItem
+                  disabled={
+                    busy ||
+                    !!activeAction ||
+                    !data.canSend ||
+                    !data.canManage ||
+                    ["running", "waiting"].includes(session.state)
+                  }
+                  onSelect={() =>
+                    void command({
+                      action: "compact",
+                      sessionId: session.id,
+                    }).catch(() => {})
+                  }
+                >
+                  Compactar contexto
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  disabled={
+                    busy ||
+                    !!activeAction ||
+                    !data.canSend ||
+                    !data.canManage ||
+                    session.state === "stopped"
+                  }
+                  onSelect={() =>
+                    void command({
+                      action: "stop",
+                      sessionId: session.id,
+                    }).catch(() => {})
+                  }
+                >
+                  <Square className="size-3.5" />
+                  Detener esta sesión
+                </DropdownMenuItem>
+              </>
+            )}
           </DropdownMenuContent>
         </DropdownMenu>
         {onClose && (
@@ -420,18 +434,20 @@ export default function WorkConversation({
                   <p className="font-medium">
                     {session.error
                       ? "No se pudo recuperar el historial"
-                      : !session.lastSeenAt
-                      ? online ? "Cargando mensajes de Orca…" : "Historial pendiente de sincronizar"
-                      : "Todavía no hay mensajes en esta vista"}
+                      : awaitingHistory
+                        ? online
+                          ? "Cargando mensajes de Orca…"
+                          : "Historial pendiente de sincronizar"
+                        : "Todavía no hay mensajes en esta vista"}
                   </p>
                   <p className="mt-2 text-sm text-muted-foreground">
                     {session.error
                       ? "El motivo aparece debajo. El puente volverá a intentarlo."
-                      : !session.lastSeenAt
-                      ? online
-                        ? "El puente está recuperando la conversación existente."
-                        : "Conecta la máquina para recuperar la conversación."
-                      : "Puedes escribir a la sesión o cambiar la vista para ver su actividad."}
+                      : awaitingHistory
+                        ? online
+                          ? "El puente está recuperando la conversación existente."
+                          : "Conecta la máquina para recuperar la conversación."
+                        : "Puedes escribir a la sesión o cambiar la vista para ver su actividad."}
                   </p>
                 </div>
               )}
@@ -439,15 +455,21 @@ export default function WorkConversation({
                 item.turn ? (
                   <div key={item.key} className="space-y-5">
                     <Turn turn={item.turn} />
-                    {data.bot.mode === "session" && item.turn.result && (
-                      <div className="space-y-2">
-                        <p className="flex items-center gap-2 text-xs font-medium">
-                          <Bot className="size-4 text-primary" />
-                          {session.name}
-                        </p>
-                        <MessageContent content={item.turn.result} />
-                      </div>
-                    )}
+                    {data.bot.mode === "session" &&
+                      item.turn.result &&
+                      !events.some(
+                        (event) =>
+                          event.body.source === "orca-terminal" &&
+                          event.body.role === "assistant",
+                      ) && (
+                        <div className="space-y-2">
+                          <p className="flex items-center gap-2 text-xs font-medium">
+                            <Bot className="size-4 text-primary" />
+                            {session.name}
+                          </p>
+                          <MessageContent content={item.turn.result} />
+                        </div>
+                      )}
                   </div>
                 ) : (
                   <HarnessEvent

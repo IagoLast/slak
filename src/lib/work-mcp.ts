@@ -194,6 +194,7 @@ export function registerWorkTools(server: McpServer, principal: WorkPrincipal) {
               and(
                 inArray(workTurns.sessionId, ids),
                 inArray(workTurns.status, ["queued", "running"]),
+                sql`not exists (select 1 from agent_tasks legacy where legacy.id = ${workTurns.id})`,
               ),
             )
             .orderBy(asc(workTurns.createdAt), asc(workTurns.id))
@@ -332,22 +333,32 @@ export function registerWorkTools(server: McpServer, principal: WorkPrincipal) {
             ...(context && { context: { ...current.context, ...context } }),
           })
           .where(eq(workSessions.id, sessionId));
-        for (const event of events)
+        if (events.length)
           await tx
             .insert(workEvents)
-            .values({
-              ...event,
-              sessionId,
-              observedAt: new Date(event.observedAt),
-            })
+            .values(
+              [
+                ...new Map(
+                  events.map((event) => [event.itemId, event]),
+                ).values(),
+              ].map((event) => ({
+                ...event,
+                sessionId,
+                observedAt: new Date(event.observedAt),
+              })),
+            )
             .onConflictDoUpdate({
               target: [workEvents.sessionId, workEvents.itemId],
-              set: { revision: event.revision, body: event.body },
+              set: {
+                revision: sql`excluded.revision`,
+                body: sql`excluded.body`,
+              },
               // Enrich existing messages from older bridges without replacing a newer revision.
-              setWhere: sql`${workEvents.revision} < ${event.revision} OR (
-                ${workEvents.revision} = ${event.revision}
-                AND ${typeof event.body.turnId === "string"}
-                AND ${workEvents.body}->>'turnId' IS NULL
+              setWhere: sql`${workEvents.revision} < excluded.revision OR (
+                ${workEvents.revision} = excluded.revision AND (
+                  (excluded.body->>'turnId' IS NOT NULL AND ${workEvents.body}->>'turnId' IS NULL)
+                  OR (excluded.body->>'slakTurnId' IS NOT NULL AND ${workEvents.body}->>'slakTurnId' IS NULL)
+                )
               )`,
             });
         if (removedItemIds.length)

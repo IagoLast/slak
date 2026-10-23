@@ -5,50 +5,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createWorkBridge, workPrompt } from "../scripts/orca-work.mjs";
 
-test("only the first message restores instructions and memory; follow-ups preserve the message with minimal Slak metadata", () => {
-  const entry = {
-    session: { role: "orchestrator" },
-    bot: { handle: "parent", description: "Project parent" },
-  };
-  const turn = {
-    id: "current",
-    kind: "human",
-    prompt: "Ahora cambia el título.\nGracias.",
-  };
-  const context = {
-    worktree: "path:/project/feature",
-    objective: "Original objective",
-    memory: "Durable context",
-    memoryVersion: 1,
-    sessions: [],
-    turns: [
-      { id: "current", author: "Iago" },
-      {
-        id: "old",
-        status: "completed",
-        prompt: "Earlier request",
-        result: "Earlier result",
-      },
-    ],
-  };
-  const first = workPrompt(entry, turn, context, "/config.json");
-  assert.match(first, /conversación de Orca/);
-  assert.doesNotMatch(first, /orquestador|delegate|agente padre/);
-  assert.match(first, /Durable context/);
-  assert.match(first, /Earlier result/);
-  const followUp = workPrompt(entry, turn, context, "/config.json", false);
-  assert.equal(
-    followUp,
-    `${JSON.stringify({ source: "Slak", author: "Iago", kind: "human", worktree: context.worktree })}\n\n${turn.prompt}`,
-  );
-  const notification = workPrompt(
-    entry,
-    { ...turn, kind: "notification" },
-    context,
-    "/config.json",
-    false,
-  );
-  assert.equal(JSON.parse(notification.split("\n")[0]).kind, "notification");
+test("native messages are sent verbatim without Slak instructions or restored prompts", () => {
+  const turn = { prompt: "Ahora cambia el título.\nGracias." };
+  assert.equal(workPrompt({ session: { imported: false } }, turn), turn.prompt);
+  assert.equal(workPrompt({ session: { imported: true } }, turn), turn.prompt);
 });
 
 test("new sessions use their selected worktrees without creating additional checkouts", async () => {

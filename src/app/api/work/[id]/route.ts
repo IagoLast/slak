@@ -55,6 +55,7 @@ export async function GET(
       memoryVersion: workSessions.memoryVersion,
       context: workSessions.context,
       generation: workSessions.generation,
+      runtimeId: workSessions.runtimeId,
       error: workSessions.error,
       lastSeenAt: workSessions.lastSeenAt,
     })
@@ -200,10 +201,13 @@ export async function GET(
           ),
         )
     : [];
-  if (bot[0]?.mode === "session" && !selected.closedAt)
-    selected.state = turns.some((turn) => turn.status === "running")
-      ? "running"
-      : "idle";
+  if (
+    bot[0]?.mode === "session" &&
+    !selected.closedAt &&
+    selected.state !== "error" &&
+    turns.some((turn) => turn.status === "running")
+  )
+    selected.state = "running";
   const { worktrees: catalog, ...botInfo } = bot[0] ?? {};
   const workspace = catalog?.find(
     (tree) =>
@@ -240,7 +244,10 @@ export async function GET(
       !!membership &&
       !!bot[0]?.enabled &&
       bot[0]?.state === "ready",
-    canManage: found.user.role !== "guest" && bot[0]?.mode === "orchestrator",
+    canManage:
+      found.user.role !== "guest" &&
+      (bot[0]?.mode === "orchestrator" ||
+        !!bot[0]?.capabilities?.includes("terminal-chat.v2")),
     canInterrupt: !!bot[0]?.capabilities?.includes("session-interrupt.v1"),
     canCloseWorktree:
       !selected.closedAt &&
@@ -373,6 +380,20 @@ export async function POST(
         await queueWorkAction(session.id, "close-worktree", { worktree }),
       );
     }
+    if (
+      bot.mode === "session" &&
+      ["message", "interrupt"].includes(body.action)
+    ) {
+      const machine = bot.machineId
+        ? await db.query.machines.findFirst({
+            where: eq(machines.id, bot.machineId),
+          })
+        : null;
+      if (!machine?.capabilities.includes("terminal-chat.v2"))
+        throw new Error(
+          "Actualiza el puente de Orca para enviar mensajes directamente a esta sesión.",
+        );
+    }
     if (body.action === "message") {
       if (session.state === "stopped")
         throw new Error("Reanuda la conversación antes de enviar un mensaje.");
@@ -412,32 +433,6 @@ export async function POST(
             throw new Error("Identificador de envío ya utilizado.");
           return;
         }
-        if (bot.mode === "session") {
-          await tx.insert(messages).values({
-            id: messageIdForTerminal(body.requestId),
-            channelId: thread.channelId,
-            parentId: thread.rootMessageId,
-            userId: user.id,
-            content: body.content,
-          });
-          await tx.insert(workTurns).values({
-            id: body.requestId,
-            sessionId: session.id,
-            userId: user.id,
-            messageId: messageIdForTerminal(body.requestId),
-            prompt: body.content,
-          });
-          await tx.insert(agentTasks).values({
-            id: body.requestId,
-            agentId: bot.id,
-            channelId: thread.channelId,
-            messageId: messageIdForTerminal(body.requestId),
-            prompt: body.content,
-            kind: "message",
-            createdBy: user.id,
-          });
-          return;
-        }
         const messageId = nanoid();
         if (session.role === "orchestrator")
           await tx.insert(messages).values({
@@ -465,7 +460,7 @@ export async function POST(
         { error: "Solo los miembros pueden gestionar sesiones." },
         { status: 403 },
       );
-    if (bot.mode === "session")
+    if (bot.mode === "session" && body.action !== "interrupt")
       throw new Error(
         "Esta sesión de terminal se gestiona desde Orca. Puedes cerrar el worktree desde Slak.",
       );
@@ -501,8 +496,4 @@ export async function POST(
   } catch (e) {
     return NextResponse.json({ error: (e as Error).message }, { status: 409 });
   }
-}
-
-function messageIdForTerminal(requestId: string) {
-  return `work-${requestId}`;
 }

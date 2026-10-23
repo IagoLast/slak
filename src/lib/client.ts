@@ -89,6 +89,7 @@ export type WorkSession = {
   memory: string;
   memoryVersion: number;
   generation: number;
+  runtimeId: string | null;
   context: { tokens?: number; window?: number; compactedAt?: string };
   error: string | null;
   lastSeenAt: string | null;

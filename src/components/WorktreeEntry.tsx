@@ -1,9 +1,9 @@
 "use client";
 
-import { useState } from "react";
+import { type ReactNode, useState } from "react";
 import useSWR from "swr";
 import Link from "next/link";
-import { GitBranch, Loader2, MessageSquare, Server } from "lucide-react";
+import { GitBranch, Loader2, MessageSquare } from "lucide-react";
 import { api, WorktreeChats } from "@/lib/client";
 import { worktreeName, workStateLabels } from "@/lib/workspaces";
 import WorkConversation from "@/components/WorkConversation";
@@ -33,27 +33,21 @@ export default function WorktreeEntry({
       (session) =>
         session.id === selectedId || session.sessionId === selectedId,
     ) || data?.sessions[0];
-  return (
-    <div className="flex h-full min-h-0 flex-1 flex-col">
-      <header className="flex items-center gap-3 border-b px-5 py-3">
-        <GitBranch className="size-5 text-muted-foreground" />
-        <div className="min-w-0 flex-1">
-          <h1 className="truncate font-semibold">
-            {data?.name || worktreeName(worktree)}
-          </h1>
-          {data && (
-            <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
-              <Server className="size-3" />
-              {data.machine}
-              {!data.online && " · Sin conexión"}
-            </p>
-          )}
-        </div>
-      </header>
+  const navigation = (
+    <div className="flex min-w-0 flex-1 items-center gap-2">
+      <span
+        title={`${data?.name || worktreeName(worktree)} · ${data?.machine || "Orca"}`}
+        className="flex max-w-36 shrink-0 items-center gap-1.5 text-sm text-muted-foreground"
+      >
+        <GitBranch className="size-4 shrink-0" />
+        <span className="hidden truncate md:inline">
+          {data?.name || worktreeName(worktree)}
+        </span>
+      </span>
       {!!data?.sessions.length && (
         <nav
           aria-label="Sesiones del worktree"
-          className="flex shrink-0 gap-1 overflow-x-auto border-b px-3 pt-2"
+          className="flex min-w-0 flex-1 gap-1 overflow-x-auto"
         >
           {data.sessions.map((session) => (
             <button
@@ -63,9 +57,8 @@ export default function WorktreeEntry({
               onClick={() => setSelectedId(session.id)}
               title={`${session.name} · ${workStateLabels[session.state]}`}
               className={cn(
-                "flex shrink-0 items-center gap-2 border-b-2 border-transparent px-3 py-2 text-sm text-muted-foreground hover:bg-muted",
-                session.id === selected?.id &&
-                  "border-primary bg-muted/50 text-foreground",
+                "flex max-w-64 shrink-0 items-center gap-2 rounded-md px-3 py-2 text-sm text-muted-foreground hover:bg-muted",
+                session.id === selected?.id && "bg-muted text-foreground",
               )}
             >
               {session.state === "running" ? (
@@ -73,7 +66,7 @@ export default function WorktreeEntry({
               ) : (
                 <MessageSquare className="size-3.5" />
               )}
-              {session.name}
+              <span className="truncate">{session.name}</span>
               {session.state === "waiting" && (
                 <span
                   className="size-2 rounded-full bg-amber-500"
@@ -83,6 +76,15 @@ export default function WorktreeEntry({
             </button>
           ))}
         </nav>
+      )}
+    </div>
+  );
+  return (
+    <div className="flex h-full min-h-0 flex-1 flex-col">
+      {!selected && !opening && (
+        <header className="flex h-12 items-center border-b px-3">
+          {navigation}
+        </header>
       )}
       {error && (
         <div className="p-5">
@@ -96,6 +98,7 @@ export default function WorktreeEntry({
       )}
       {selected ? (
         <SessionEntry
+          navigation={navigation}
           key={selected.id}
           machineId={machineId}
           worktree={worktree}
@@ -109,6 +112,7 @@ export default function WorktreeEntry({
         <SessionEntry
           machineId={machineId}
           worktree={worktree}
+          navigation={navigation}
           onOpen={() => void mutate()}
         />
       ) : data ? (
@@ -147,6 +151,7 @@ function SessionEntry({
   machineId,
   worktree,
   selected,
+  navigation,
   onOpen,
   draft,
   onDraftChange,
@@ -154,6 +159,7 @@ function SessionEntry({
   machineId: string;
   worktree: string;
   selected?: WorktreeChats["sessions"][number];
+  navigation: ReactNode;
   onOpen?: () => void;
   draft?: string;
   onDraftChange?: (draft: string) => void;
@@ -186,36 +192,42 @@ function SessionEntry({
       <WorkConversation
         key={`${conversation.threadId}:${conversation.sessionId}`}
         {...conversation}
+        navigation={navigation}
         draft={draft}
         onDraftChange={onDraftChange}
         embedded
       />
     );
   return (
-    <div className="flex flex-1 flex-col items-center justify-center gap-4 p-6 text-center">
-      {error ? (
-        <>
-          <p role="alert" className="max-w-md text-sm text-destructive">
-            {error.message}
+    <>
+      <header className="flex h-12 items-center border-b px-3">
+        {navigation}
+      </header>
+      <div className="flex flex-1 flex-col items-center justify-center gap-4 p-6 text-center">
+        {error ? (
+          <>
+            <p role="alert" className="max-w-md text-sm text-destructive">
+              {error.message}
+            </p>
+            <div className="flex gap-2">
+              <Button variant="outline" onClick={() => mutate()}>
+                Reintentar
+              </Button>
+              <Button variant="ghost" asChild>
+                <Link href="/machines">Ver máquinas</Link>
+              </Button>
+            </div>
+          </>
+        ) : (
+          <p
+            role="status"
+            className="flex items-center gap-2 text-sm text-muted-foreground"
+          >
+            <Loader2 className="size-4 animate-spin" />
+            Abriendo conversación…
           </p>
-          <div className="flex gap-2">
-            <Button variant="outline" onClick={() => mutate()}>
-              Reintentar
-            </Button>
-            <Button variant="ghost" asChild>
-              <Link href="/machines">Ver máquinas</Link>
-            </Button>
-          </div>
-        </>
-      ) : (
-        <p
-          role="status"
-          className="flex items-center gap-2 text-sm text-muted-foreground"
-        >
-          <Loader2 className="size-4 animate-spin" />
-          Abriendo conversación…
-        </p>
-      )}
-    </div>
+        )}
+      </div>
+    </>
   );
 }
