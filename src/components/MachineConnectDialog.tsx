@@ -85,11 +85,12 @@ export default function MachineConnectDialog({
         {connected ? (
           <div className="space-y-5">
             <p className="text-sm text-muted-foreground">
-              Ya puedes crear un agente y encargarle trabajo desde Slak.
+              Cada proyecto compartido tiene su agente padre. Ya puedes
+              encargarle trabajo desde Slak.
             </p>
             <div className="flex flex-wrap gap-2">
               <Button asChild>
-                <Link href="/agents">Crear un agente</Link>
+                <Link href="/agents">Ver agentes padre</Link>
               </Button>
               <Button variant="outline" onClick={onClose}>
                 Listo

@@ -1,3 +1,5 @@
+import type { SharedWorktree } from "@/lib/workspaces";
+
 export const fetcher = async (url: string) => {
   const res = await fetch(url);
   if (!res.ok) throw new Error(`Error ${res.status}`);
@@ -64,6 +66,7 @@ export type AgentContact = {
   enabled: boolean;
   machineId: string | null;
   worktree: string;
+  repository: string;
   ownerName: string;
   provider: "codex" | "claude";
   state: "external" | "starting" | "ready" | "stopping" | "stopped" | "error";
@@ -78,6 +81,14 @@ export type WorkThreadSummary = {
   worktree: string | null;
   handle: string;
   machine: string | null;
+  machineId: string | null;
+  repository: string;
+  online: boolean;
+  workers: {
+    name: string;
+    worktree: string | null;
+    state: WorkThreadSummary["state"];
+  }[];
   state: "idle" | "running" | "waiting" | "stopped" | "error";
   createdAt: string;
 };
@@ -86,6 +97,7 @@ export type WorkSession = {
   name: string;
   role: "orchestrator" | "worker";
   parentId: string | null;
+  worktree: string | null;
   state: WorkThreadSummary["state"];
   memory: string;
   memoryVersion: number;
@@ -132,8 +144,10 @@ export type WorkConversationData = {
     state: string;
     lastSeenAt: string | null;
     online: boolean;
+    enabled: boolean;
   };
   canSend: boolean;
+  childRequests: WorkEvent[];
   hasOlder: boolean;
   next: { events: string | null; turns: string | null };
 };
@@ -145,6 +159,8 @@ export type SharedMachine = {
   ownerName: string;
   online: boolean;
   enabled: boolean;
+  lastSeenAt: string | null;
+  worktrees: SharedWorktree[];
   repositories: { id: string; name: string }[];
   sessions: {
     worktree: string;

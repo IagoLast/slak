@@ -2,7 +2,14 @@
 /** Run this bridge on the same host as Orca and the shared worktrees. */
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { readFile, writeFile, mkdir, rm, rename, realpath } from "node:fs/promises";
+import {
+  readFile,
+  writeFile,
+  mkdir,
+  rm,
+  rename,
+  realpath,
+} from "node:fs/promises";
 import { createWorkBridge } from "./orca-work.mjs";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -56,6 +63,24 @@ export async function call(client, name, args = {}) {
 }
 const quote = (text) => `'${text.replaceAll("'", "'\\''")}'`;
 
+// Discovery and lifecycle operations can also exceed the presence timeout.
+export function keepMachineOnline(client, intervalMs = 15000) {
+  let pending = false;
+  const timer = setInterval(async () => {
+    if (pending) return;
+    pending = true;
+    try {
+      await call(client, "heartbeat");
+    } catch {
+      // The main loop reports connection failures and reconnects.
+    } finally {
+      pending = false;
+    }
+  }, intervalMs);
+  timer.unref?.();
+  return () => clearInterval(timer);
+}
+
 export async function discover({ shareAll, repos, worktrees }, run = orca) {
   const all = (await run(["repo", "list"])).repos ?? [];
   const selected = all.filter(
@@ -69,6 +94,7 @@ export async function discover({ shareAll, repos, worktrees }, run = orca) {
     name: (r.displayName || r.path.split("/").pop()).slice(0, 100),
   }));
   const sessions = [];
+  const sharedWorktrees = [];
   for (const repo of selected) {
     const list = await run([
       "worktree",
@@ -84,6 +110,14 @@ export async function discover({ shareAll, repos, worktrees }, run = orca) {
         (!w.hostId || w.hostId === "local") &&
         (!worktrees.length || worktrees.includes(`path:${w.path}`)),
     )) {
+      if (sharedWorktrees.length >= 500) break;
+      sharedWorktrees.push({
+        worktree: `path:${wt.path}`,
+        name: (wt.displayName || wt.branch || wt.path).slice(0, 100),
+        repository: `id:${repo.id}`,
+        branch: (wt.branch || "").replace(/^refs\/heads\//, "").slice(0, 500),
+        status: (wt.workspaceStatus || "").slice(0, 80),
+      });
       const { terminals = [] } = await run([
         "terminal",
         "list",
@@ -108,7 +142,11 @@ export async function discover({ shareAll, repos, worktrees }, run = orca) {
         });
     }
   }
-  return { repositories, sessions: sessions.slice(0, 200) };
+  return {
+    repositories,
+    sessions: sessions.slice(0, 200),
+    worktrees: sharedWorktrees,
+  };
 }
 
 export async function executeCommand(
@@ -264,7 +302,8 @@ async function main() {
     }
     return;
   }
-  if (!values.repo.length && Array.isArray(config.repos)) values.repo = config.repos;
+  if (!values.repo.length && Array.isArray(config.repos))
+    values.repo = config.repos;
   if (!values["share-all"] && !values.repo.length)
     throw new Error("Elige qué compartir con --repo id:ID o --share-all.");
   const statePath = `${configPath}.state.json`,
@@ -331,8 +370,15 @@ async function main() {
     lastDiscovery = 0;
   try {
     do {
+      let stopHeartbeat;
       try {
         client ??= await connect(config);
+        const identity = await call(client, "heartbeat");
+        if (identity.kind !== "machine")
+          throw new Error(
+            "Usa la configuración de una máquina compartida, no la de un agente externo.",
+          );
+        stopHeartbeat = keepMachineOnline(client);
         if (!catalog || Date.now() - lastDiscovery > 30_000) {
           catalog = await discover({
             shareAll: values["share-all"],
@@ -341,11 +387,7 @@ async function main() {
           });
           lastDiscovery = Date.now();
         }
-        const identity = await call(client, "heartbeat", catalog);
-        if (identity.kind !== "machine")
-          throw new Error(
-            "Usa la configuración de una máquina compartida, no la de un agente externo.",
-          );
+        await call(client, "heartbeat", catalog);
         if (!announced) {
           console.log("Máquina conectada a Slak. Ya puedes volver a la app.");
           announced = true;
@@ -452,23 +494,17 @@ async function main() {
         }
         for (const id of Object.keys(state.tasks))
           if (!tasks.some((t) => t.id === id)) delete state.tasks[id];
-        // Compaction may take longer than one heartbeat. Keep presence alive
-        // without publishing a different catalog midway through this tick.
-        const heartbeat = setInterval(() => {
-          if (client) void call(client, "heartbeat").catch(() => {});
-        }, 15000);
-        try {
-          await workTick(client, catalog);
-        } finally {
-          clearInterval(heartbeat);
-        }
+        await workTick(client, catalog);
         await save();
         if (values.once) break;
       } catch (error) {
+        stopHeartbeat?.();
         console.error(`Puente: ${error.message}`);
         await client?.close().catch(() => {});
         client = undefined;
         if (values.once) throw error;
+      } finally {
+        stopHeartbeat?.();
       }
       if (!stopped) await new Promise((r) => setTimeout(r, 4000));
     } while (!stopped);

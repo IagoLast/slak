@@ -4,6 +4,7 @@ import {
   discover,
   executeCommand,
   taskPrompt,
+  keepMachineOnline,
 } from "../scripts/orca-bridge.mjs";
 
 test("discovery publishes only explicitly shared local projects and sessions", async () => {
@@ -42,6 +43,72 @@ test("discovery publishes only explicitly shared local projects and sessions", a
   assert.deepEqual(catalog.repositories, [{ id: "id:a", name: "A" }]);
   assert.equal(catalog.sessions.length, 1);
   assert.equal(catalog.sessions[0].worktree, "path:/a/one");
+  assert.equal(catalog.worktrees.length, 1);
+  assert.equal(catalog.worktrees[0].worktree, "path:/a/one");
+});
+
+test("worktrees without terminal agents retain their Orca status and respect sharing limits", async () => {
+  const calls = [];
+  const catalog = await discover(
+    { shareAll: false, repos: ["id:a"], worktrees: ["path:/a/native"] },
+    async (args) => {
+      calls.push(args);
+      if (args[0] === "repo") return { repos: [{ id: "a", path: "/a" }] };
+      if (args[0] === "worktree")
+        return {
+          worktrees: [
+            {
+              path: "/a/native",
+              branch: "refs/heads/feature",
+              workspaceStatus: "in-progress",
+            },
+            { path: "/a/private" },
+            { path: "/a/archived", isArchived: true },
+            { path: "/a/remote", hostId: "remote" },
+          ],
+        };
+      return { terminals: [] };
+    },
+  );
+  assert.deepEqual(catalog.sessions, []);
+  assert.deepEqual(catalog.worktrees, [
+    {
+      worktree: "path:/a/native",
+      name: "refs/heads/feature",
+      repository: "id:a",
+      branch: "feature",
+      status: "in-progress",
+    },
+  ]);
+  assert.equal(calls.filter((args) => args[0] === "terminal").length, 1);
+});
+
+test("presence remains alive during slow operations without overlapping heartbeat calls", async (t) => {
+  t.mock.timers.enable({ apis: ["setInterval"] });
+  let count = 0;
+  let finish;
+  const client = {
+    callTool: async ({ name }) => {
+      assert.equal(name, "heartbeat");
+      count++;
+      await new Promise((resolve) => {
+        finish = resolve;
+      });
+      return { content: [] };
+    },
+  };
+  const stop = keepMachineOnline(client);
+  t.mock.timers.tick(60_000);
+  assert.equal(count, 1);
+  finish();
+  await new Promise((resolve) => setImmediate(resolve));
+  t.mock.timers.tick(15_000);
+  assert.equal(count, 2);
+  finish();
+  await new Promise((resolve) => setImmediate(resolve));
+  stop();
+  t.mock.timers.tick(60_000);
+  assert.equal(count, 2);
 });
 
 test("stop closes only the selected agent terminal and never removes its worktree", async () => {

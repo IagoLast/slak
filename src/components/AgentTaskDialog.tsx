@@ -40,7 +40,10 @@ export default function AgentTaskDialog({ channelId }: { channelId: string }) {
   );
   const available =
     data?.agents.filter(
-      (a) => a.enabled && members?.members.some((m) => m.id === a.id),
+      (a) =>
+        a.mode === "orchestrator" &&
+        a.enabled &&
+        members?.members.some((m) => m.id === a.id),
     ) ?? [];
   async function submit(event: React.FormEvent) {
     event.preventDefault();

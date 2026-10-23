@@ -29,12 +29,27 @@ export async function POST(
       const [machine] = await tx
         .select()
         .from(machines)
-        .where(eq(machines.id, agent.machineId));
+        .where(eq(machines.id, agent.machineId))
+        .for("update");
       if (
         !machine?.tokenHash ||
         !machine.repositories.some((r) => r.id === agent.repository)
       )
         throw new Error("Conecta la máquina y comparte el proyecto primero.");
+      const [parent] = await tx
+        .select({ id: agents.id })
+        .from(agents)
+        .where(
+          and(
+            eq(agents.machineId, machine.id),
+            eq(agents.repository, agent.repository),
+            eq(agents.mode, "orchestrator"),
+          ),
+        );
+      if (parent)
+        throw new Error(
+          "Este proyecto ya tiene un agente padre en esa máquina.",
+        );
       const pending = await tx
         .select({ id: agentTasks.id })
         .from(agentTasks)

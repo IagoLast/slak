@@ -164,6 +164,10 @@ const STATEMENTS = [
     machine_id text REFERENCES machines(id) ON DELETE CASCADE, token_hash text NOT NULL UNIQUE,
     expires_at timestamptz NOT NULL, consumed_at timestamptz
   )`,
+  sql`ALTER TABLE machines ADD COLUMN IF NOT EXISTS worktrees jsonb NOT NULL DEFAULT '[]'`,
+  sql`ALTER TABLE work_sessions ADD COLUMN IF NOT EXISTS worktree text`,
+  sql`UPDATE work_sessions s SET worktree = t.worktree FROM work_threads t
+      WHERE s.thread_id = t.id AND s.role = 'worker' AND s.runtime_id IS NOT NULL AND s.worktree IS NULL`,
 ];
 
 const SCHEMA_VERSION = STATEMENTS.length;

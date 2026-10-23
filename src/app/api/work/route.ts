@@ -1,4 +1,4 @@
-import { and, desc, eq, or, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, or, sql } from "drizzle-orm";
 import { NextResponse } from "next/server";
 import { db } from "@/db";
 import {
@@ -24,6 +24,10 @@ export async function GET(req: Request) {
       worktree: workThreads.worktree,
       handle: agents.handle,
       machine: machines.name,
+      machineId: agents.machineId,
+      repository: workThreads.repository,
+      machineSeenAt: machines.lastSeenAt,
+      machineEnabled: sql<boolean>`${machines.tokenHash} is not null`,
       state: workSessions.state,
       createdAt: workThreads.createdAt,
     })
@@ -50,9 +54,48 @@ export async function GET(req: Request) {
         query.get("rootId")
           ? eq(workThreads.rootMessageId, query.get("rootId")!)
           : undefined,
+        query.get("machineId")
+          ? eq(agents.machineId, query.get("machineId")!)
+          : undefined,
+        query.get("worktree")
+          ? or(
+              eq(workThreads.worktree, query.get("worktree")!),
+              sql`exists (select 1 from work_sessions child where child.thread_id = ${workThreads.id} and child.worktree = ${query.get("worktree")!})`,
+            )
+          : undefined,
       ),
     )
     .orderBy(desc(workThreads.createdAt))
     .limit(100);
-  return NextResponse.json({ threads });
+  const workers = threads.length
+    ? await db
+        .select({
+          threadId: workSessions.threadId,
+          name: workSessions.name,
+          worktree: workSessions.worktree,
+          state: workSessions.state,
+        })
+        .from(workSessions)
+        .where(
+          and(
+            inArray(
+              workSessions.threadId,
+              threads.map((thread) => thread.id),
+            ),
+            eq(workSessions.role, "worker"),
+          ),
+        )
+    : [];
+  return NextResponse.json({
+    threads: threads.map(({ machineSeenAt, machineEnabled, ...thread }) => ({
+      ...thread,
+      workers: workers
+        .filter((worker) => worker.threadId === thread.id)
+        .map(({ name, worktree, state }) => ({ name, worktree, state })),
+      online:
+        machineEnabled &&
+        !!machineSeenAt &&
+        machineSeenAt.getTime() > Date.now() - 60_000,
+    })),
+  });
 }

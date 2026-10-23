@@ -57,26 +57,22 @@ before(async () => {
       role: "guest",
     },
   ]);
-  await db
-    .insert(machines)
-    .values({
-      id: machine,
-      name: "Test",
-      ownerId: human,
-      tokenHash: prefix,
-      repositories: [{ id: "id:test", name: "Test" }],
-    });
-  await db
-    .insert(agents)
-    .values({
-      id: bot,
-      handle: prefix,
-      mode: "orchestrator",
-      machineId: machine,
-      repository: "id:test",
-      createdBy: human,
-      state: "ready",
-    });
+  await db.insert(machines).values({
+    id: machine,
+    name: "Test",
+    ownerId: human,
+    tokenHash: prefix,
+    repositories: [{ id: "id:test", name: "Test" }],
+  });
+  await db.insert(agents).values({
+    id: bot,
+    handle: prefix,
+    mode: "orchestrator",
+    machineId: machine,
+    repository: "id:test",
+    createdBy: human,
+    state: "ready",
+  });
   await db
     .insert(channels)
     .values({ id: channel, name: "Test", type: "private" });
@@ -84,14 +80,12 @@ before(async () => {
     { channelId: channel, userId: human },
     { channelId: channel, userId: bot },
   ]);
-  await db
-    .insert(messages)
-    .values({
-      id: root,
-      channelId: channel,
-      userId: human,
-      content: "Explora",
-    });
+  await db.insert(messages).values({
+    id: root,
+    channelId: channel,
+    userId: human,
+    content: "Explora",
+  });
 });
 after(async () => {
   await db.delete(channels).where(eq(channels.id, channel));
@@ -107,15 +101,13 @@ test("simultaneous replies share one coordinator; messages are FIFO and completi
     [1, 2].map(async (n) =>
       db.transaction(async (tx) => {
         const messageId = `${prefix}-message-${n}`;
-        await tx
-          .insert(messages)
-          .values({
-            id: messageId,
-            parentId: root,
-            channelId: channel,
-            userId: human,
-            content: `Reply ${n}`,
-          });
+        await tx.insert(messages).values({
+          id: messageId,
+          parentId: root,
+          channelId: channel,
+          userId: human,
+          content: `Reply ${n}`,
+        });
         await enqueueWork(tx, {
           agentId: bot,
           channelId: channel,
@@ -159,6 +151,39 @@ test("simultaneous replies share one coordinator; messages are FIFO and completi
   assert.equal(replies.length, 1);
   await claimWorkTurn(sessionId, turns[1].id);
   await finishWorkTurn(turns[1].id, "Segundo", "completed");
+});
+
+test("a direct conversation reuses the project parent without sharing another channel's context", async () => {
+  const dm = `${prefix}-dm`;
+  await db.insert(channels).values({ id: dm, name: "dm", type: "dm" });
+  try {
+    const results = await Promise.all(
+      [1, 2].map((n) =>
+        db.transaction(async (tx) => {
+          const messageId = `${prefix}-dm-${n}`;
+          await tx
+            .insert(messages)
+            .values({
+              id: messageId,
+              channelId: dm,
+              userId: human,
+              content: `Request ${n}`,
+            });
+          return enqueueWork(tx, {
+            agentId: bot,
+            channelId: dm,
+            messageId,
+            userId: human,
+            prompt: `Request ${n}`,
+          });
+        }),
+      ),
+    );
+    assert.equal(results[0].id, results[1].id);
+    assert.notEqual(results[0].id, threadId);
+  } finally {
+    await db.delete(channels).where(eq(channels.id, dm));
+  }
 });
 
 test("workers have independent queues, notify parent, and cannot overwrite newer durable memory", async () => {

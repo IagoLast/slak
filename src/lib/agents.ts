@@ -8,6 +8,7 @@ import {
   channelMembers,
   channels,
   messages,
+  users,
   workThreads,
 } from "@/db/schema";
 import { enqueueWork } from "@/lib/work";
@@ -35,6 +36,44 @@ export async function authenticateAgent(request: Request) {
 }
 
 type Transaction = Parameters<Parameters<typeof db.transaction>[0]>[0];
+
+/** The caller holds the machine row lock, shared by manual creation and heartbeat. */
+export async function ensureProjectAgents(
+  tx: Transaction,
+  machine: { id: string; name: string; ownerId: string },
+  repositories: { id: string; name: string }[],
+) {
+  const existing = await tx
+    .select()
+    .from(agents)
+    .where(
+      and(eq(agents.machineId, machine.id), eq(agents.mode, "orchestrator")),
+    );
+  for (const repository of repositories) {
+    if (existing.some((agent) => agent.repository === repository.id)) continue;
+    const id = nanoid();
+    await tx.insert(users).values({
+      id,
+      name: repository.name,
+      email: `${id}@agents.slak.invalid`,
+      passwordHash: "disabled",
+      kind: "agent",
+      role: "guest",
+      lastSeenAt: new Date(0),
+    });
+    await tx.insert(agents).values({
+      id,
+      handle: `orca-${id.toLowerCase()}`,
+      mode: "orchestrator",
+      description: `Agente padre de ${repository.name}. Coordina los encargos, crea worktrees y delega en subagentes.`,
+      machineId: machine.id,
+      machine: machine.name,
+      repository: repository.id,
+      state: "ready",
+      createdBy: machine.ownerId,
+    });
+  }
+}
 
 /** Only current channel members can receive mentions. No implicit private-channel grants. */
 export async function queueAgentMessages(

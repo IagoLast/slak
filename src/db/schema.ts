@@ -1,4 +1,5 @@
 import { sql } from "drizzle-orm";
+import type { SharedWorktree } from "@/lib/workspaces";
 import {
   index,
   uniqueIndex,
@@ -240,6 +241,10 @@ export const machines = pgTable("machines", {
     .$type<{ id: string; name: string }[]>()
     .notNull()
     .default([]),
+  worktrees: jsonb("worktrees")
+    .$type<SharedWorktree[]>()
+    .notNull()
+    .default([]),
   sessions: jsonb("sessions")
     .$type<
       {
@@ -329,6 +334,7 @@ export const workSessions = pgTable(
       .notNull()
       .default("idle"),
     runtimeId: text("runtime_id"),
+    worktree: text("worktree"),
     generation: integer("generation").notNull().default(1),
     memory: text("memory").notNull().default(""),
     memoryVersion: integer("memory_version").notNull().default(0),

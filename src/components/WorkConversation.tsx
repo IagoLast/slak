@@ -14,7 +14,6 @@ import {
   Loader2,
   MessageSquare,
   MoreHorizontal,
-  Plus,
   Server,
   Square,
   Terminal,
@@ -31,11 +30,16 @@ import {
 } from "@/lib/client";
 import MessageContent from "@/components/MessageContent";
 import { workStateLabels } from "@/components/WorkList";
+import { worktreeName } from "@/lib/workspaces";
+import {
+  conversationViews,
+  visibleWorkEvents,
+  visibleWorkTurns,
+} from "@/lib/work-view";
+import { useConversationView } from "@/components/useConversationView";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
   Select,
@@ -67,11 +71,10 @@ export default function WorkConversation({
   compact?: boolean;
   onClose?: () => void;
 }) {
-  const [selected, setSelected] = useState<string>();
+  const [view, setView] = useConversationView();
   const [draft, setDraft] = useState("");
   const [busy, setBusy] = useState(false);
   const [memoryOpen, setMemoryOpen] = useState(false);
-  const [delegateOpen, setDelegateOpen] = useState(false);
   const [older, setOlder] = useState<{
     events: WorkEvent[];
     turns: WorkTurn[];
@@ -81,7 +84,7 @@ export default function WorkConversation({
   const [cursor, setCursor] = useState<WorkConversationData["next"]>();
   const [actionError, setActionError] = useState("");
   const { data, error, mutate } = useSWR<WorkConversationData>(
-    `/api/work/${threadId}${selected ? `?session=${selected}` : ""}`,
+    `/api/work/${threadId}`,
     fetcher,
     { refreshInterval: 1800 },
   );
@@ -104,15 +107,13 @@ export default function WorkConversation({
     ).values(),
   ];
   const timeline = [
-    ...events
-      .filter((e) => !["turn"].includes(String(e.body.kind)))
-      .map((event) => ({
-        key: `e:${event.itemId}`,
-        time: event.observedAt,
-        event,
-        turn: undefined,
-      })),
-    ...turns.map((turn) => ({
+    ...visibleWorkEvents(events, view).map((event) => ({
+      key: `e:${event.itemId}`,
+      time: event.observedAt,
+      event,
+      turn: undefined,
+    })),
+    ...visibleWorkTurns(turns, view).map((turn) => ({
       key: `t:${turn.id}`,
       time: turn.createdAt,
       turn,
@@ -124,16 +125,7 @@ export default function WorkConversation({
   useEffect(() => {
     if (scroll.current && stick.current)
       scroll.current.scrollTop = scroll.current.scrollHeight;
-  }, [latest, revision, session?.id]);
-  function choose(id: string) {
-    setSelected(id);
-    setOlder({ events: [], turns: [] });
-    setMore(true);
-    setCursor(undefined);
-    setDraft("");
-    setActionError("");
-    stick.current = true;
-  }
+  }, [latest, revision, session?.id, view]);
   async function command(body: Record<string, unknown>) {
     setBusy(true);
     setActionError("");
@@ -209,7 +201,6 @@ export default function WorkConversation({
         <Skeleton className="h-48" />
       </div>
     );
-  const coordinator = data.sessions.find((s) => s.role === "orchestrator")!;
   const online = data.bot.online;
   const queued = turns.filter((t) => t.status === "queued").length;
   const activeAction = data.actions.find((a) =>
@@ -271,25 +262,6 @@ export default function WorkConversation({
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end">
-            <DropdownMenuItem
-              disabled={!data.canSend}
-              onSelect={() => setDelegateOpen(true)}
-            >
-              Crear subagente
-            </DropdownMenuItem>
-            <DropdownMenuItem
-              disabled={
-                !!data.thread.worktree || !data.canSend || !!activeAction
-              }
-              onSelect={() =>
-                void command({
-                  action: "workspace",
-                  sessionId: coordinator.id,
-                }).catch(() => {})
-              }
-            >
-              Crear workspace aislado
-            </DropdownMenuItem>
             <DropdownMenuItem
               disabled={
                 busy ||
@@ -359,45 +331,60 @@ export default function WorkConversation({
         {!compact && (
           <aside className="hidden w-60 shrink-0 flex-col border-r bg-muted/15 p-4 lg:flex">
             <p className="mb-3 text-xs font-medium text-muted-foreground">
-              CONVERSACIONES
+              EQUIPO DEL PROYECTO
             </p>
             <div className="space-y-1">
               {data.sessions.map((s) => (
-                <Button
+                <div
                   key={s.id}
-                  variant={s.id === session.id ? "secondary" : "ghost"}
-                  className={`h-auto w-full justify-start gap-2 py-3 ${s.role === "worker" ? "pl-6" : ""}`}
-                  onClick={() => choose(s.id)}
+                  className={`flex items-start gap-2 rounded-md py-2 ${s.role === "worker" ? "pl-3" : ""}`}
                 >
                   {s.role === "orchestrator" ? (
-                    <Bot className="size-4 shrink-0" />
+                    <Bot className="mt-0.5 size-4 shrink-0" />
                   ) : (
-                    <GitBranch className="size-4 shrink-0" />
+                    <GitBranch className="mt-0.5 size-4 shrink-0" />
                   )}
-                  <span className="min-w-0 text-left">
-                    <span className="block truncate text-sm">{s.name}</span>
-                    <span className="block text-xs font-normal text-muted-foreground">
-                      {workStateLabels[s.state]}
+                  <span className="min-w-0">
+                    <span className="block truncate text-sm">
+                      {s.role === "orchestrator" ? "Agente padre" : s.name}
                     </span>
+                    <span className="block text-xs text-muted-foreground">
+                      {online ? workStateLabels[s.state] : "Sin conexión"}
+                    </span>
+                    {s.role === "worker" && s.worktree && (
+                      <span
+                        className="block truncate text-xs text-muted-foreground"
+                        title={s.worktree}
+                      >
+                        {worktreeName(s.worktree)}
+                      </span>
+                    )}
                   </span>
-                </Button>
+                </div>
               ))}
             </div>
-            <Button
-              variant="ghost"
-              className="mt-3 justify-start text-muted-foreground"
-              disabled={!data.canSend}
-              onClick={() => setDelegateOpen(true)}
-            >
-              <Plus className="size-4" />
-              Crear subagente
-            </Button>
+            <p className="mt-3 mb-4 text-xs text-muted-foreground">
+              Hablas con el agente padre. Él coordina los worktrees y recoge los
+              resultados de los subagentes.
+            </p>
             <div className="mt-auto space-y-3 border-t pt-4 text-xs text-muted-foreground">
               <p className="flex items-center gap-2">
                 <Server className="size-3.5" />
                 {data.bot.machine}
               </p>
-              <p>{online ? "Máquina conectada" : "Máquina desconectada"}</p>
+              <p>
+                {online ? "Máquina conectada" : "Puente de Orca desconectado"}
+              </p>
+              {!online && (
+                <p>
+                  {data.bot.enabled
+                    ? "Abre el conector de Slak en esa máquina para reanudar el trabajo."
+                    : "La conexión está revocada. Vuelve a conectar la máquina."}{" "}
+                  <Link href="/machines" className="underline">
+                    Revisar conexión
+                  </Link>
+                </p>
+              )}
               <p className="flex items-start gap-2">
                 <GitBranch className="size-3.5 shrink-0" />
                 <span className="break-all">
@@ -409,19 +396,25 @@ export default function WorkConversation({
           </aside>
         )}
         <main className="flex min-h-0 min-w-0 flex-1 flex-col">
-          <div className="flex items-center gap-2 border-b px-5 py-2.5 text-xs">
+          <div className="flex flex-wrap items-center gap-2 border-b px-5 py-2.5 text-xs">
             <MessageSquare className="size-3.5 text-muted-foreground" />
             <span className="font-medium">{session.name}</span>
-            {session.role === "worker" && (
-              <Button
+            <Select value={view} onValueChange={setView}>
+              <SelectTrigger
+                className="ml-auto"
                 size="sm"
-                variant="link"
-                className="ml-auto h-auto p-0 text-xs"
-                onClick={() => choose(coordinator.id)}
+                aria-label="Vista de la conversación"
               >
-                Volver al orquestador
-              </Button>
-            )}
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent align="end">
+                {conversationViews.map((option) => (
+                  <SelectItem key={option.value} value={option.value}>
+                    {option.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
             {!online && (
               <span className="ml-auto text-muted-foreground">
                 Se enviará cuando vuelva la máquina
@@ -468,6 +461,7 @@ export default function WorkConversation({
                   <HarnessEvent
                     key={item.key}
                     event={item.event!}
+                    showActivity={view === "activity"}
                     name={session.name}
                     disabled={busy || !!activeAction || !data.canSend}
                     onRespond={(body) =>
@@ -482,6 +476,28 @@ export default function WorkConversation({
                   />
                 ),
               )}
+              {data.childRequests?.map((request) => (
+                <HarnessEvent
+                  key={`${request.sessionId}:${request.itemId}`}
+                  event={request}
+                  showActivity={false}
+                  name={
+                    data.sessions.find(
+                      (child) => child.id === request.sessionId,
+                    )?.name || "Subagente"
+                  }
+                  disabled={busy || !data.canSend}
+                  onRespond={(body) =>
+                    command({
+                      action: "respond",
+                      sessionId: request.sessionId,
+                      itemId: request.itemId,
+                      revision: request.revision,
+                      ...body,
+                    })
+                  }
+                />
+              ))}
               {["running", "waiting"].includes(session.state) && (
                 <div
                   role="status"
@@ -541,24 +557,9 @@ export default function WorkConversation({
                 className="min-h-24 resize-none border-0 bg-transparent shadow-none focus-visible:ring-0"
               />
               <div className="flex items-center justify-between gap-2 px-3 pb-3">
-                <Select value={session.id} onValueChange={choose}>
-                  <SelectTrigger
-                    aria-label="Destinatario"
-                    className="h-8 max-w-56 border-0 bg-muted/60 text-xs"
-                  >
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {data.sessions.map((s) => (
-                      <SelectItem key={s.id} value={s.id}>
-                        {s.name}
-                        {s.role === "orchestrator"
-                          ? " · por defecto"
-                          : " · subagente"}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                  <Bot className="size-3.5" /> Agente padre · @{data.bot.handle}
+                </span>
                 <Button
                   size="icon"
                   className="size-8 rounded-lg"
@@ -619,14 +620,6 @@ export default function WorkConversation({
           )}
         </DialogContent>
       </Dialog>
-      <DelegateDialog
-        open={delegateOpen}
-        onOpenChange={setDelegateOpen}
-        onSubmit={async (name, prompt) => {
-          await command({ action: "delegate", name, prompt });
-          setDelegateOpen(false);
-        }}
-      />
     </div>
   );
 }
@@ -679,11 +672,13 @@ function HarnessEvent({
   name,
   onRespond,
   disabled,
+  showActivity,
 }: {
   event: WorkEvent;
   name: string;
   onRespond: (body: Record<string, unknown>) => Promise<unknown>;
   disabled: boolean;
+  showActivity: boolean;
 }) {
   const b = event.body;
   if (b.kind === "message") {
@@ -699,7 +694,8 @@ function HarnessEvent({
         {blocks.map((block, i) =>
           block.type === "text" ? (
             <MessageContent key={i} content={String(block.text)} />
-          ) : ["subagent", "subagent-group", "background-task"].includes(
+          ) : showActivity &&
+            ["subagent", "subagent-group", "background-task"].includes(
               String(block.type),
             ) ? (
             <details key={i} className="rounded-lg border p-3 text-xs">
@@ -955,76 +951,5 @@ function PromptEvent({
         <p className="text-xs text-muted-foreground">Solicitud resuelta</p>
       )}
     </div>
-  );
-}
-function DelegateDialog({
-  open,
-  onOpenChange,
-  onSubmit,
-}: {
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
-  onSubmit: (name: string, prompt: string) => Promise<void>;
-}) {
-  const [name, setName] = useState("");
-  const [prompt, setPrompt] = useState("");
-  const [busy, setBusy] = useState(false);
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent>
-        <DialogHeader>
-          <DialogTitle>Crear subagente</DialogTitle>
-          <DialogDescription>
-            Tendrá su propia conversación dentro de este hilo. El orquestador
-            recibirá sus resultados.
-          </DialogDescription>
-        </DialogHeader>
-        <form
-          className="space-y-4"
-          onSubmit={async (e) => {
-            e.preventDefault();
-            setBusy(true);
-            try {
-              await onSubmit(name, prompt);
-              setName("");
-              setPrompt("");
-            } catch {
-              /* parent reports */
-            } finally {
-              setBusy(false);
-            }
-          }}
-        >
-          <div className="space-y-2">
-            <Label htmlFor="worker-name">Nombre</Label>
-            <Input
-              id="worker-name"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              required
-              maxLength={80}
-              placeholder="Explorar backend"
-            />
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="worker-task">Encargo</Label>
-            <Textarea
-              id="worker-task"
-              value={prompt}
-              onChange={(e) => setPrompt(e.target.value)}
-              required
-              maxLength={16000}
-              placeholder="Qué debe investigar o resolver…"
-            />
-          </div>
-          <Button
-            type="submit"
-            disabled={busy || !name.trim() || !prompt.trim()}
-          >
-            {busy ? "Creando…" : "Crear subagente"}
-          </Button>
-        </form>
-      </DialogContent>
-    </Dialog>
   );
 }

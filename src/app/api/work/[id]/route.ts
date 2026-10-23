@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, sql } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { NextResponse } from "next/server";
 import { z } from "zod";
@@ -17,7 +17,7 @@ import {
 } from "@/db/schema";
 import { getAccessibleChannel } from "@/lib/channels";
 import { getSessionUser } from "@/lib/session";
-import { delegateWork, queueWorkAction } from "@/lib/work";
+import { queueWorkAction } from "@/lib/work";
 
 async function access(id: string) {
   const user = await getSessionUser();
@@ -47,6 +47,7 @@ export async function GET(
       name: workSessions.name,
       role: workSessions.role,
       parentId: workSessions.parentId,
+      worktree: workSessions.worktree,
       state: workSessions.state,
       memory: workSessions.memory,
       memoryVersion: workSessions.memoryVersion,
@@ -58,9 +59,7 @@ export async function GET(
     .from(workSessions)
     .where(eq(workSessions.threadId, thread.id))
     .orderBy(asc(workSessions.createdAt));
-  const selected =
-    sessions.find((s) => s.id === query.get("session")) ??
-    sessions.find((s) => s.role === "orchestrator")!;
+  const selected = sessions.find((s) => s.role === "orchestrator")!;
   const cursorSchema = z.object({
     at: z.iso.datetime(),
     id: z.string().max(4096),
@@ -141,6 +140,7 @@ export async function GET(
         state: agents.state,
         machine: machines.name,
         lastSeenAt: machines.lastSeenAt,
+        enabled: sql<boolean>`${machines.tokenHash} is not null`,
       })
       .from(agents)
       .innerJoin(users, eq(users.id, agents.id))
@@ -153,20 +153,67 @@ export async function GET(
       ),
     }),
   ]);
+  const pageEvents = events.slice(0, 200);
+  const turnIds = [
+    ...new Set(
+      pageEvents.flatMap((event) =>
+        typeof event.body.turnId === "string" ? [event.body.turnId] : [],
+      ),
+    ),
+  ];
+  // A long turn may start on an older page. Include its lifecycle so the
+  // answers-only view can recognize completion without loading all tool events.
+  const lifecycles = turnIds.length
+    ? await db
+        .select()
+        .from(workEvents)
+        .where(
+          and(
+            eq(workEvents.sessionId, selected.id),
+            inArray(workEvents.itemId, turnIds),
+          ),
+        )
+    : [];
+  const childIds = sessions
+    .filter((session) => session.role === "worker")
+    .map((session) => session.id);
+  const childRequests = childIds.length
+    ? await db
+        .select()
+        .from(workEvents)
+        .where(
+          and(
+            inArray(workEvents.sessionId, childIds),
+            sql`${workEvents.body}->>'kind' IN ('approval', 'question')`,
+            sql`${workEvents.body}->'resolution'->>'state' = 'pending'`,
+          ),
+        )
+        .orderBy(asc(workEvents.observedAt))
+        .limit(100)
+    : [];
   return NextResponse.json({
     thread,
     sessions,
     selectedId: selected.id,
-    events: events.slice(0, 200).reverse(),
+    events: [
+      ...new Map(
+        [...pageEvents.reverse(), ...lifecycles].map((event) => [
+          event.itemId,
+          event,
+        ]),
+      ).values(),
+    ],
     turns: turns.slice(0, 100).reverse(),
     actions,
+    childRequests,
     bot: {
       ...bot[0],
       online:
+        !!bot[0]?.enabled &&
         !!bot[0]?.lastSeenAt &&
         bot[0].lastSeenAt.getTime() > Date.now() - 60000,
     },
-    canSend: !!membership && bot[0]?.state === "ready",
+    canSend: !!membership && !!bot[0]?.enabled && bot[0]?.state === "ready",
     hasOlder: events.length > 200 || turns.length > 100,
     next: {
       events:
@@ -191,11 +238,6 @@ const command = z.discriminatedUnion("action", [
     sessionId: z.string().optional(),
     content: z.string().trim().min(1).max(16000),
     requestId: z.string().min(16).max(100),
-  }),
-  z.object({
-    action: z.literal("delegate"),
-    name: z.string().trim().min(1).max(80),
-    prompt: z.string().trim().min(1).max(16000),
   }),
   z.object({
     action: z.enum(["stop", "compact", "rotate", "workspace"]),
@@ -264,6 +306,14 @@ export async function POST(
       { error: "Sesión no encontrada" },
       { status: 404 },
     );
+  if (session.role !== "orchestrator" && body.action !== "respond")
+    return NextResponse.json(
+      {
+        error:
+          "Habla con el agente padre del proyecto; él coordina a los subagentes.",
+      },
+      { status: 400 },
+    );
   try {
     if (body.action === "message") {
       if (session.state === "stopped")
@@ -306,10 +356,6 @@ export async function POST(
       });
       return NextResponse.json({ queued: true });
     }
-    if (body.action === "delegate")
-      return NextResponse.json(
-        await delegateWork(session.id, body.name, body.prompt, user.id),
-      );
     if (
       user.role === "guest" &&
       ["stop", "rotate", "workspace"].includes(body.action)

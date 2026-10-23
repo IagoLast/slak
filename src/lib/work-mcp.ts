@@ -98,7 +98,10 @@ export function registerWorkTools(server: McpServer, principal: WorkPrincipal) {
         .where(eq(workSessions.threadId, thread.id));
       return output({
         objective: thread.objective,
-        worktree: thread.worktree,
+        worktree:
+          session.role === "worker"
+            ? (session.worktree ?? thread.worktree)
+            : thread.worktree,
         memory: session.memory,
         memoryVersion: session.memoryVersion,
         sessions: siblings,
@@ -126,7 +129,7 @@ export function registerWorkTools(server: McpServer, principal: WorkPrincipal) {
     "work_delegate",
     {
       description:
-        "El orquestador crea un subagente con conversación propia en este hilo. El equipo puede hablarle directamente. Sus resultados vuelven automáticamente al orquestador. Solicita primero work_workspace si necesita editar código.",
+        "El agente padre delega un encargo en un subagente con su propio worktree aislado. Sus resultados vuelven automáticamente al padre, que responde al equipo en Slak.",
       inputSchema: {
         sessionId: id,
         name: z.string().trim().min(1).max(80),
@@ -270,9 +273,10 @@ export function registerWorkTools(server: McpServer, principal: WorkPrincipal) {
         generation: z.number().int().positive(),
         runtimeId: id,
         token: z.string().regex(/^slak_[a-f0-9]{64}$/),
+        worktree: z.string().min(1).max(1000).optional(),
       },
     },
-    async ({ sessionId, generation, runtimeId, token }) => {
+    async ({ sessionId, generation, runtimeId, token, worktree }) => {
       const { session } = await scope(sessionId);
       if (
         session.generation !== generation ||
@@ -281,7 +285,12 @@ export function registerWorkTools(server: McpServer, principal: WorkPrincipal) {
         throw new Error("La sesión cambió.");
       await db
         .update(workSessions)
-        .set({ runtimeId, tokenHash: hashToken(token), error: null })
+        .set({
+          runtimeId,
+          tokenHash: hashToken(token),
+          error: null,
+          ...(worktree && { worktree }),
+        })
         .where(eq(workSessions.id, sessionId));
       return output({ ok: true });
     },
@@ -357,7 +366,12 @@ export function registerWorkTools(server: McpServer, principal: WorkPrincipal) {
             .onConflictDoUpdate({
               target: [workEvents.sessionId, workEvents.itemId],
               set: { revision: event.revision, body: event.body },
-              setWhere: sql`${workEvents.revision} < ${event.revision}`,
+              // Enrich existing messages from older bridges without replacing a newer revision.
+              setWhere: sql`${workEvents.revision} < ${event.revision} OR (
+                ${workEvents.revision} = ${event.revision}
+                AND ${typeof event.body.turnId === "string"}
+                AND ${workEvents.body}->>'turnId' IS NULL
+              )`,
             });
         if (removedItemIds.length)
           await tx
@@ -464,15 +478,13 @@ export function registerWorkTools(server: McpServer, principal: WorkPrincipal) {
                 ),
               );
             if (session.parentId)
-              await tx
-                .insert(workTurns)
-                .values({
-                  id: nanoid(),
-                  sessionId: session.parentId,
-                  userId: thread.createdBy,
-                  kind: "notification",
-                  prompt: `${session.name} fue detenido por el equipo. Su conversación y memoria se conservan.`,
-                });
+              await tx.insert(workTurns).values({
+                id: nanoid(),
+                sessionId: session.parentId,
+                userId: thread.createdBy,
+                kind: "notification",
+                prompt: `${session.name} fue detenido por el equipo. Su conversación y memoria se conservan.`,
+              });
           }
           if (action.kind === "compact")
             await tx

@@ -141,6 +141,11 @@ export function publicEvents(items, generation) {
     )
     .map((i) => {
       let body = clean(i.body);
+      if (body.kind === "message") {
+        if (i.turnScope?.turnItemId)
+          body.turnId = `${generation}:${i.turnScope.turnItemId}`;
+        if (i.agentId) body.agentId = i.agentId;
+      }
       if (JSON.stringify(body).length > 95000)
         body = {
           kind: "status",
@@ -222,7 +227,7 @@ export function turnCompletion(page, submissionId) {
   return {
     status,
     result:
-      parts.join("\n\n").slice(-32000) ||
+      parts.at(-1)?.slice(-32000) ||
       (status === "completed"
         ? "Turno completado."
         : "El turno terminó sin una respuesta confirmada."),

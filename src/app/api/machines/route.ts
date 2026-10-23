@@ -19,6 +19,7 @@ export async function GET() {
       ownerName: users.name,
       repositories: machines.repositories,
       sessions: machines.sessions,
+      worktrees: machines.worktrees,
       lastSeenAt: machines.lastSeenAt,
       tokenHash: machines.tokenHash,
     })
@@ -28,6 +29,9 @@ export async function GET() {
   return NextResponse.json({
     machines: rows.map(({ lastSeenAt, tokenHash, ...machine }) => ({
       ...machine,
+      // Guests see workspaces only through their authorized work threads.
+      worktrees: user.role === "guest" ? [] : machine.worktrees,
+      lastSeenAt,
       enabled: !!tokenHash,
       online:
         !!tokenHash &&

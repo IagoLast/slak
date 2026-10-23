@@ -19,6 +19,15 @@ test("native completion requires evidence for this exact send, not an older fini
     ],
     items: [
       {
+        itemId: "progress",
+        body: {
+          kind: "message",
+          role: "assistant",
+          blocks: [{ type: "text", text: "Estoy investigando" }],
+        },
+        turnScope: { kind: "turn", turnItemId: "turn-1" },
+      },
+      {
         itemId: "turn-1",
         body: {
           kind: "turn",
@@ -53,7 +62,7 @@ test("native completion requires evidence for this exact send, not an older fini
     result: "Listo",
   });
   assert.equal(turnCompletion(page, "send-2"), null);
-  page.items[0].body.state = "running";
+  page.items.find((item) => item.body.kind === "turn").body.state = "running";
   assert.equal(turnCompletion(page, "send-1"), null);
 });
 
@@ -117,6 +126,30 @@ test("native payload fingerprints are canonical and bind to method and session",
     mutation("agentSession.send", "codex_two", 1, b.body).envelope
       .payloadFingerprint,
   );
+});
+
+test("public messages retain namespaced turn and agent identities for customizable conversation views", () => {
+  const [event] = publicEvents(
+    [
+      {
+        itemId: "answer",
+        revision: 2,
+        sequence: 3,
+        observedAt: 1700000000000,
+        agentId: "worker",
+        turnScope: { kind: "turn", turnItemId: "turn" },
+        body: {
+          kind: "message",
+          role: "assistant",
+          blocks: [{ type: "text", text: "Answer" }],
+        },
+      },
+    ],
+    4,
+  );
+  assert.equal(event.body.turnId, "4:turn");
+  assert.equal(event.body.agentId, "worker");
+  assert.equal(event.revision, 2);
 });
 
 test("context percentage uses provider measurements and restored prompts include durable memory", () => {

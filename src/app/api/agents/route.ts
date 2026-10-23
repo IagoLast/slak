@@ -1,4 +1,4 @@
-import { asc, eq } from "drizzle-orm";
+import { and, asc, eq } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { nanoid } from "nanoid";
 import { NextResponse } from "next/server";
@@ -23,6 +23,7 @@ export async function GET() {
       machine: agents.machine,
       machineId: agents.machineId,
       worktree: agents.worktree,
+      repository: agents.repository,
       provider: agents.provider,
       state: agents.state,
       error: agents.error,
@@ -132,6 +133,24 @@ export async function POST(req: Request) {
   const { token, tokenHash } = newAgentToken();
   try {
     await db.transaction(async (tx) => {
+      if (machine && profile.mode === "orchestrator") {
+        await tx
+          .select({ id: machines.id })
+          .from(machines)
+          .where(eq(machines.id, machine.id))
+          .for("update");
+        const [parent] = await tx
+          .select({ id: agents.id })
+          .from(agents)
+          .where(
+            and(
+              eq(agents.machineId, machine.id),
+              eq(agents.repository, profile.repository),
+              eq(agents.mode, "orchestrator"),
+            ),
+          );
+        if (parent) throw new Error("PROJECT_PARENT_EXISTS");
+      }
       await tx.insert(users).values({
         id,
         name,
@@ -166,6 +185,14 @@ export async function POST(req: Request) {
         });
     });
   } catch (error) {
+    if (error instanceof Error && error.message === "PROJECT_PARENT_EXISTS")
+      return NextResponse.json(
+        {
+          error:
+            "Este proyecto ya tiene un agente padre en esa máquina. Ábrelo desde la barra lateral.",
+        },
+        { status: 409 },
+      );
     const cause = error as { cause?: { code?: string }; code?: string };
     if (cause.code === "23505" || cause.cause?.code === "23505")
       return NextResponse.json(

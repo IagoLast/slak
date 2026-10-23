@@ -80,10 +80,17 @@ Los adjuntos siguen necesitando `BLOB_READ_WRITE_TOKEN`; chat, agentes y MCP no.
 
 ## Orca compartido: máquinas, bots y conversaciones
 
-Cada persona comparte su máquina mediante un puente MCP. El bot (`@iago-bot`) es
-una identidad estable, no un proceso ni un worktree. Cada mención principal abre
-un **hilo de trabajo** con un orquestador y contexto propios. Responder dentro de
-ese hilo continúa el trabajo; no crea otro workspace por mensaje.
+Cada máquina compartida tiene un **agente padre por proyecto de Orca**. Slak lo
+crea automáticamente al recibir los proyectos del puente y reutiliza los padres
+existentes. El padre es el interlocutor del equipo: organiza el trabajo y delega
+en subagentes, cada uno con su propio worktree aislado. No hay que elegir entre
+crear un bot, compartir una terminal o conectar un agente externo.
+
+El mensaje directo conserva la conversación con el padre. Los encargos de otros
+canales mantienen hilos, permisos y contextos separados: una identidad de proyecto
+no implica compartir memoria privada entre canales. Las conversaciones hijas se
+siguen desde Orca; en Slak se muestran sus estados y las solicitudes que necesitan
+una respuesta del equipo.
 
 1. En **Máquinas compartidas → Conectar mi Orca**, pulsa **Copiar comando**.
 2. Pégalo en una terminal de la **misma máquina que Orca** y elige los proyectos
@@ -101,19 +108,25 @@ ese hilo continúa el trabajo; no crea otro workspace por mensaje.
    15 minutos; el token permanente nunca aparece en él. Para otra máquina, usa
    una URL HTTPS de Slak accesible desde ella. El puente no abre puertos.
 
-3. En **Agentes del equipo**, crea un **bot orquestador** y elige máquina y
-   proyecto. Un agente de terminal existente tiene **Activar orquestador** para
-   conservar su alias; exige terminar antes su trabajo pendiente. Su terminal
-   anterior y sus conversaciones se conservan.
-4. Añade el bot al canal desde **Miembros** y menciona `@alias`, abre un DM o usa
-   **Encargar tarea**. **Abrir conversación** muestra mensajes, herramientas,
-   resultados, cambios y solicitudes de aprobación reales de Orca.
-5. El orquestador puede responder directamente, crear un worktree aislado cuando
-   necesite editar o delegar en subagentes. Cada subagente tiene conversación propia
-   dentro del hilo. El selector del compositor permite hablarle directamente;
-   el orquestador recibe automáticamente el encargo y el resultado de esa intervención.
-   Los mensajes de varias personas se encolan por sesión; los hilos pueden avanzar
-   en paralelo. **Crear subagente** también permite delegar desde la UI.
+3. La barra lateral muestra **máquina → proyecto → agente padre y worktrees**.
+   Los worktrees conservan su último estado cuando el puente se desconecta, y los
+   hilos abren siempre la conversación con el padre.
+4. Habla con el padre desde la barra lateral, añádelo a un canal y menciona
+   `@alias`, o usa **Encargar tarea**. El padre responde y reúne los resultados.
+5. El padre puede crear subagentes con `work_delegate`; el puente prepara un
+   worktree distinto para cada subagente nuevo. Las sesiones ya existentes
+   conservan su workspace. Los resultados vuelven automáticamente al padre.
+   Slak no ofrece mensajes directos ni creación manual de subagentes. Las preguntas
+   y aprobaciones de los hijos aparecen en la conversación del padre.
+
+   La vista se puede cambiar entre **Solo respuestas** (por defecto), **Mensajes
+   y avances** y **Toda la actividad**. La preferencia se guarda en el navegador.
+   Las preguntas, aprobaciones y errores siempre permanecen visibles. Los eventos
+   antiguos sin metadatos de turno conservan sus mensajes hasta sincronizarse con
+   un puente actualizado; no se adivina qué respuesta era final.
+   Las instrucciones y la memoria se envían al iniciar o restaurar una sesión.
+   Los siguientes mensajes conservan el texto original con metadatos mínimos de
+   origen, autor, tipo de mensaje y worktree cuando corresponde.
 6. En el menú de conversación puedes **Detener**, **Compactar contexto** o
    **Renovar sesión desde la memoria**. Reanudar una sesión detenida crea una nueva
    generación conservando hilo, memoria y eventos. Detener el bot detiene sus
@@ -163,8 +176,8 @@ una instalación incompatible muestra un error, sin simular herramientas ni pasa
 silenciosamente a terminal. Si no se detecta la instalación, define
 `SLAK_ORCA_RUNTIME=/ruta/a/out/cli/runtime/client.js`.
 
-Los subagentes creados con `work_delegate` son sesiones nativas controlables desde
-Slak. La actividad de subagentes internos del proveedor se muestra en su padre;
+Los subagentes creados con `work_delegate` son sesiones nativas coordinadas por
+el agente padre. La actividad de subagentes internos del proveedor se muestra en su padre;
 no se presenta como una conversación independiente si Orca no la expone como tal.
 Las preguntas agrupadas y aprobaciones se responden con revisión para impedir
 respuestas sobre una solicitud que ya cambió.
@@ -218,6 +231,7 @@ Los mensajes directos no admiten este borrado.
 npm run lint
 npx tsc --noEmit
 npm test                 # contratos de los adaptadores, sin lanzar agentes reales
+node --import tsx --test tests/workspaces.test.ts tests/work-view.test.ts
 npm run build
 ```
 

@@ -65,6 +65,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
+import WorkspaceSidebar from "@/components/WorkspaceSidebar";
 
 const NOTIF_PREF_KEY = "slak:notifications";
 function notificationsEnabled() {
@@ -236,6 +237,12 @@ export default function Sidebar({
             <ListTodo /> Tareas
           </NavLink>
         </div>
+        <WorkspaceSidebar
+          guest={userRole === "guest"}
+          agents={agentData?.agents ?? []}
+          onOpenAgent={openDm}
+          onNavigate={onNavigate}
+        />
         <div>
           <SectionHeader
             label="Canales"
@@ -272,21 +279,23 @@ export default function Sidebar({
         <div>
           <SectionHeader label="Agentes" />
           <ul className="space-y-0.5">
-            {agentData?.agents.map((agent) => (
-              <li key={agent.id}>
-                <Button
-                  variant="ghost"
-                  className="w-full justify-start font-normal"
-                  onClick={() => openDm(agent.id)}
-                >
-                  <Bot className="text-muted-foreground" />
-                  <span className="flex-1 truncate text-left">
-                    {agent.name}
-                  </span>
-                  <PresenceDot online={agent.online} />
-                </Button>
-              </li>
-            ))}
+            {agentData?.agents
+              .filter((agent) => agent.mode === "orchestrator")
+              .map((agent) => (
+                <li key={agent.id}>
+                  <Button
+                    variant="ghost"
+                    className="w-full justify-start font-normal"
+                    onClick={() => openDm(agent.id)}
+                  >
+                    <Bot className="text-muted-foreground" />
+                    <span className="flex-1 truncate text-left">
+                      {agent.name}
+                    </span>
+                    <PresenceDot online={agent.online} />
+                  </Button>
+                </li>
+              ))}
           </ul>
           {!agentData?.agents.length && (
             <p className="px-2 py-1 text-xs text-muted-foreground">

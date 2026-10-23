@@ -19,6 +19,7 @@ import { registerWorkTools } from "@/lib/work-mcp";
 import {
   agentInbox,
   authenticateAgent,
+  ensureProjectAgents,
   claimTask,
   finishTask,
   hashToken,
@@ -111,19 +112,41 @@ export async function POST(request: Request) {
           )
           .max(200)
           .optional(),
+        worktrees: z
+          .array(
+            z.object({
+              worktree: z.string().min(1).max(1000),
+              name: z.string().min(1).max(100),
+              repository: z.string().min(1).max(500),
+              branch: z.string().max(500),
+              status: z.string().max(80),
+            }),
+          )
+          .max(500)
+          .optional(),
       },
     },
-    async ({ repositories, sessions }) => {
-      if (machine)
-        await db
-          .update(machines)
-          .set({
-            lastSeenAt: new Date(),
-            ...(repositories && { repositories }),
-            ...(sessions && { sessions }),
-          })
-          .where(eq(machines.id, machine.id));
-      else
+    async ({ repositories, sessions, worktrees }) => {
+      if (machine) {
+        await db.transaction(async (tx) => {
+          await tx
+            .select({ id: machines.id })
+            .from(machines)
+            .where(eq(machines.id, machine.id))
+            .for("update");
+          await tx
+            .update(machines)
+            .set({
+              lastSeenAt: new Date(),
+              ...(repositories && { repositories }),
+              ...(sessions && { sessions }),
+              ...(worktrees && { worktrees }),
+            })
+            .where(eq(machines.id, machine.id));
+          if (repositories)
+            await ensureProjectAgents(tx, machine, repositories);
+        });
+      } else
         await db
           .update(agents)
           .set({ lastSeenAt: new Date() })

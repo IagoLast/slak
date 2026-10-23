@@ -3,6 +3,7 @@ import { nanoid } from "nanoid";
 import { db } from "@/db";
 import {
   agents,
+  channels,
   messages,
   workActions,
   workSessions,
@@ -28,21 +29,36 @@ export async function enqueueWork(
     .select()
     .from(messages)
     .where(eq(messages.id, input.messageId));
+  const [channel] = await tx
+    .select()
+    .from(channels)
+    .where(eq(channels.id, input.channelId));
   const rootId = source.parentId ?? source.id;
-  await tx
-    .select({ id: messages.id })
-    .from(messages)
-    .where(eq(messages.id, rootId))
-    .for("update");
+  if (channel.type === "dm")
+    // Message inserts already hold a foreign-key lock on the channel. An
+    // advisory lock serializes the parent without upgrading that shared lock.
+    await tx.execute(
+      sql`select pg_advisory_xact_lock(hashtextextended(${JSON.stringify(["parent-dm", input.channelId, input.agentId])}, 0))`,
+    );
+  else
+    await tx
+      .select({ id: messages.id })
+      .from(messages)
+      .where(eq(messages.id, rootId))
+      .for("update");
   let [thread] = await tx
     .select()
     .from(workThreads)
     .where(
       and(
-        eq(workThreads.rootMessageId, rootId),
+        channel.type === "dm"
+          ? eq(workThreads.channelId, input.channelId)
+          : eq(workThreads.rootMessageId, rootId),
         eq(workThreads.agentId, input.agentId),
       ),
-    );
+    )
+    .orderBy(asc(workThreads.createdAt))
+    .limit(1);
   if (!thread) {
     const [bot] = await tx
       .select()
@@ -65,14 +81,12 @@ export async function enqueueWork(
         createdBy: input.userId,
       })
       .returning();
-    await tx
-      .insert(workSessions)
-      .values({
-        id: nanoid(),
-        threadId: thread.id,
-        name: "Orquestador",
-        role: "orchestrator",
-      });
+    await tx.insert(workSessions).values({
+      id: nanoid(),
+      threadId: thread.id,
+      name: "Orquestador",
+      role: "orchestrator",
+    });
   }
   const [session] = await tx
     .select()
@@ -119,24 +133,20 @@ export async function delegateWork(
         "Este hilo ya tiene 15 subagentes. Reutiliza una conversación existente.",
       );
     const id = nanoid();
-    await tx
-      .insert(workSessions)
-      .values({
-        id,
-        threadId: parent.threadId,
-        parentId,
-        name,
-        role: "worker",
-      });
-    await tx
-      .insert(workTurns)
-      .values({
-        id: nanoid(),
-        sessionId: id,
-        userId,
-        prompt,
-        kind: "delegation",
-      });
+    await tx.insert(workSessions).values({
+      id,
+      threadId: parent.threadId,
+      parentId,
+      name,
+      role: "worker",
+    });
+    await tx.insert(workTurns).values({
+      id: nanoid(),
+      sessionId: id,
+      userId,
+      prompt,
+      kind: "delegation",
+    });
     return { id, threadId: parent.threadId };
   });
 }
@@ -169,15 +179,13 @@ export async function finishWorkTurn(
       })
       .where(eq(workSessions.id, session.id));
     if (session.role === "orchestrator" && result) {
-      await tx
-        .insert(messages)
-        .values({
-          id: nanoid(),
-          channelId: thread.channelId,
-          parentId: thread.rootMessageId,
-          userId: thread.agentId,
-          content: result,
-        });
+      await tx.insert(messages).values({
+        id: nanoid(),
+        channelId: thread.channelId,
+        parentId: thread.rootMessageId,
+        userId: thread.agentId,
+        content: result,
+      });
     }
     // A direct intervention in a worker always returns to the coordinator's inbox.
     // The bot's own replies never feed back into themselves.

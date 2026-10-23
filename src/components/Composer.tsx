@@ -53,6 +53,7 @@ export default function Composer({
     ? (agents?.agents
         .filter(
           (a) =>
+            a.mode === "orchestrator" &&
             a.enabled &&
             a.handle.includes(mention[1].toLowerCase()) &&
             members?.members.some((m) => m.id === a.id),
