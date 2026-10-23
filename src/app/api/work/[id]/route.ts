@@ -162,6 +162,7 @@ export async function GET(
         state: agents.state,
         machine: machines.name,
         machineOwnerId: machines.ownerId,
+        machineId: machines.id,
         capabilities: machines.capabilities,
         worktrees: machines.worktrees,
         lastSeenAt: machines.lastSeenAt,
@@ -199,23 +200,6 @@ export async function GET(
           ),
         )
     : [];
-  const childIds = (selected.role === "orchestrator" ? sessions : [])
-    .filter((session) => session.role === "worker")
-    .map((session) => session.id);
-  const childRequests = childIds.length
-    ? await db
-        .select()
-        .from(workEvents)
-        .where(
-          and(
-            inArray(workEvents.sessionId, childIds),
-            sql`${workEvents.body}->>'kind' IN ('approval', 'question')`,
-            sql`${workEvents.body}->'resolution'->>'state' = 'pending'`,
-          ),
-        )
-        .orderBy(asc(workEvents.observedAt))
-        .limit(100)
-    : [];
   if (bot[0]?.mode === "session" && !selected.closedAt)
     selected.state = turns.some((turn) => turn.status === "running")
       ? "running"
@@ -244,7 +228,6 @@ export async function GET(
     ],
     turns: turns.slice(0, 100).reverse(),
     actions,
-    childRequests,
     bot: {
       ...botInfo,
       online:
@@ -258,6 +241,7 @@ export async function GET(
       !!bot[0]?.enabled &&
       bot[0]?.state === "ready",
     canManage: found.user.role !== "guest" && bot[0]?.mode === "orchestrator",
+    canInterrupt: !!bot[0]?.capabilities?.includes("session-interrupt.v1"),
     canCloseWorktree:
       !selected.closedAt &&
       !!bot[0]?.capabilities?.includes("worktree-close.v1") &&
@@ -294,9 +278,9 @@ const command = z.discriminatedUnion("action", [
   z.object({
     action: z.enum([
       "stop",
+      "interrupt",
       "compact",
       "rotate",
-      "workspace",
       "close-worktree",
     ]),
     sessionId: z.string().min(1),
@@ -348,7 +332,7 @@ export async function POST(
   });
   if (!membership || bot?.state !== "ready")
     return NextResponse.json(
-      { error: "El bot debe estar disponible y ser miembro del canal." },
+      { error: "La sesión ya no está disponible para esta conversación." },
       { status: 409 },
     );
   const session = await db.query.workSessions.findFirst({
@@ -363,13 +347,6 @@ export async function POST(
     return NextResponse.json(
       { error: "Sesión no encontrada" },
       { status: 404 },
-    );
-  if (session.role !== "orchestrator" && body.action === "workspace")
-    return NextResponse.json(
-      {
-        error: "El subagente ya trabaja en su propio worktree.",
-      },
-      { status: 400 },
     );
   try {
     if (session.closedAt) throw new Error("Este worktree está cerrado.");
@@ -411,7 +388,12 @@ export async function POST(
         const pending = await tx.query.workActions.findFirst({
           where: and(
             eq(workActions.sessionId, session.id),
-            inArray(workActions.kind, ["stop", "rotate", "close-worktree"]),
+            inArray(workActions.kind, [
+              "stop",
+              "interrupt",
+              "rotate",
+              "close-worktree",
+            ]),
             inArray(workActions.status, ["queued", "running"]),
           ),
         });
@@ -477,7 +459,7 @@ export async function POST(
     }
     if (
       user.role === "guest" &&
-      ["stop", "compact", "rotate", "workspace"].includes(body.action)
+      ["stop", "interrupt", "compact", "rotate"].includes(body.action)
     )
       return NextResponse.json(
         { error: "Solo los miembros pueden gestionar sesiones." },

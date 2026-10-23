@@ -55,24 +55,6 @@ export type ChatMessage = {
   user: { id: string; name: string; kind?: "human" | "agent" };
 };
 
-export type AgentContact = {
-  id: string;
-  name: string;
-  handle: string;
-  mode: "session" | "orchestrator";
-  description: string;
-  machine: string;
-  online: boolean;
-  enabled: boolean;
-  machineId: string | null;
-  worktree: string;
-  repository: string;
-  ownerName: string;
-  provider: "codex" | "claude";
-  state: "external" | "starting" | "ready" | "stopping" | "stopped" | "error";
-  error: string | null;
-};
-
 export type WorkThreadSummary = {
   id: string;
   title: string;
@@ -155,8 +137,8 @@ export type WorkConversationData = {
   };
   canSend: boolean;
   canManage: boolean;
+  canInterrupt: boolean;
   canCloseWorktree: boolean;
-  childRequests: WorkEvent[];
   hasOlder: boolean;
   next: { events: string | null; turns: string | null };
 };
@@ -180,21 +162,6 @@ export type SharedMachine = {
   }[];
 };
 
-export type AgentTask = {
-  id: string;
-  agentId: string;
-  channelId: string;
-  messageId: string;
-  kind: "task" | "message";
-  prompt: string;
-  status: "queued" | "running" | "completed" | "failed";
-  result: string | null;
-  createdAt: string;
-  updatedAt: string;
-  agentName: string;
-  agentHandle: string;
-};
-
 export async function api<T = Record<string, never>>(
   url: string,
   method: string,
@@ -210,3 +177,18 @@ export async function api<T = Record<string, never>>(
     throw new Error(data?.error ?? "No se pudo completar la operación.");
   return data;
 }
+
+export type WorktreeChats = {
+  name: string;
+  machine: string;
+  online: boolean;
+  canOpen: boolean;
+  sessions: {
+    id: string;
+    threadId: string | null;
+    sessionId: string | null;
+    runtimeId: string | null;
+    name: string;
+    state: WorkSession["state"];
+  }[];
+};

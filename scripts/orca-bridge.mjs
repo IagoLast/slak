@@ -422,7 +422,9 @@ async function main() {
         }
         await call(client, "heartbeat", {
           ...catalog,
-          capabilities: native ? ["worktree-chat.v1", "worktree-close.v1"] : [],
+          capabilities: native
+            ? ["worktree-chat.v1", "worktree-close.v1", "session-interrupt.v1"]
+            : [],
         });
         if (!announced) {
           console.log("Máquina conectada a Slak. Ya puedes volver a la app.");

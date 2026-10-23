@@ -172,6 +172,11 @@ const STATEMENTS = [
   sql`ALTER TABLE work_sessions ADD COLUMN IF NOT EXISTS imported boolean NOT NULL DEFAULT false`,
   sql`ALTER TABLE work_sessions ADD COLUMN IF NOT EXISTS provider text`,
   sql`ALTER TABLE machines ADD COLUMN IF NOT EXISTS capabilities jsonb NOT NULL DEFAULT '[]'`,
+  sql`ALTER TABLE channels ADD COLUMN IF NOT EXISTS is_worktree boolean NOT NULL DEFAULT false`,
+  sql`UPDATE channels c SET is_worktree = true WHERE c.type = 'private' AND c.name LIKE 'Worktree · %' AND EXISTS (
+    SELECT 1 FROM work_threads w JOIN messages m ON m.id = w.root_message_id
+    WHERE w.channel_id = c.id AND m.content LIKE 'Conversación de %'
+  )`,
 ];
 
 const SCHEMA_VERSION = STATEMENTS.length;

@@ -32,7 +32,8 @@ test("only the first message restores instructions and memory; follow-ups preser
     ],
   };
   const first = workPrompt(entry, turn, context, "/config.json");
-  assert.match(first, /Eres el orquestador/);
+  assert.match(first, /conversación de Orca/);
+  assert.doesNotMatch(first, /orquestador|delegate|agente padre/);
   assert.match(first, /Durable context/);
   assert.match(first, /Earlier result/);
   const followUp = workPrompt(entry, turn, context, "/config.json", false);
@@ -50,7 +51,7 @@ test("only the first message restores instructions and memory; follow-ups preser
   assert.equal(JSON.parse(notification.split("\n")[0]).kind, "notification");
 });
 
-test("the parent stays on the project and each new worker receives its own reusable worktree", async () => {
+test("new sessions use their selected worktrees without creating additional checkouts", async () => {
   const dir = await mkdtemp(join(tmpdir(), "slak-workers-"));
   const created = [];
   const nativeCreates = [];
@@ -63,7 +64,7 @@ test("the parent stays on the project and each new worker receives its own reusa
       role: id === "parent" ? "orchestrator" : "worker",
       state: "idle",
       runtimeId: null,
-      worktree: null,
+      worktree: `path:/project/${id}`,
     },
     thread: { id: "thread", repository: "id:repo", worktree: null },
     bot: { state: "ready", provider: "codex", handle: "parent" },
@@ -123,12 +124,12 @@ test("the parent stays on the project and each new worker receives its own reusa
   });
   try {
     await tick({}, { repositories: [{ id: "id:repo" }] });
-    assert.equal(bindings.get("parent"), "path:/project");
-    assert.equal(bindings.get("one"), "path:/project/slak-worker-one");
-    assert.equal(bindings.get("two"), "path:/project/slak-worker-two");
+    assert.equal(bindings.get("parent"), "path:/project/parent");
+    assert.equal(bindings.get("one"), "path:/project/one");
+    assert.equal(bindings.get("two"), "path:/project/two");
     assert.equal(new Set(nativeCreates).size, 3);
     await tick({}, { repositories: [{ id: "id:repo" }] });
-    assert.equal(created.length, 2);
+    assert.equal(created.length, 0);
     assert.equal(nativeCreates.length, 3);
   } finally {
     await rm(dir, { recursive: true, force: true });
@@ -362,4 +363,125 @@ test("an interrupted close without a receipt is reported, never silently retried
   await tick({}, { repositories: [{ id: "id:repo" }] });
   assert.equal(reports[0].phase, "fail");
   assert.match(reports[0].error, /interrumpió/);
+});
+
+test("interrupt cancels only the selected runtime without closing or replacing it", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "slak-interrupt-"));
+  const calls = [],
+    reports = [];
+  const entry = {
+    session: {
+      id: "selected",
+      generation: 1,
+      role: "orchestrator",
+      state: "running",
+      runtimeId: "existing",
+      worktree: "path:/project/feature",
+      imported: true,
+    },
+    thread: {
+      id: "thread",
+      repository: "id:repo",
+      worktree: "path:/project/feature",
+    },
+    bot: { state: "ready", mode: "orchestrator", provider: "codex" },
+  };
+  const tick = createWorkBridge({
+    config: { token: "test", url: "http://localhost/api/mcp" },
+    configPath: join(dir, "config.json"),
+    state: {},
+    save: async () => {},
+    call: async (_client, name, args) => {
+      if (name === "work_inbox") {
+        assert.ok(args.capabilities.includes("session-interrupt.v1"));
+        return {
+          sessions: [entry],
+          turns: [{ id: "pending", sessionId: "selected", status: "queued" }],
+          actions: [
+            {
+              id: "interrupt",
+              sessionId: "selected",
+              kind: "interrupt",
+              status: "queued",
+              payload: {},
+            },
+          ],
+        };
+      }
+      if (name === "work_action") reports.push(args);
+      if (name === "work_sync")
+        assert.notEqual(args.state, "error", args.error);
+      return {};
+    },
+    run: async () => ({ repos: [{ id: "repo", path: "/project" }] }),
+    runtimeLoader: async () => ({
+      call: async (method, args) => {
+        calls.push(method);
+        assert.equal(args.sessionId || args.envelope?.sessionId, "existing");
+        if (method === "agentSession.cancel") return { value: {}, fence: 1 };
+        assert.equal(method, "agentSession.history");
+        return {
+          page: {
+            items: [],
+            fence: 1,
+            epoch: "test",
+            liveCursor: { epoch: "test", sequence: 0 },
+            hasOlder: false,
+            working: true,
+            actionablePromptIds: [],
+          },
+        };
+      },
+    }),
+  });
+  try {
+    await tick({}, { repositories: [{ id: "id:repo" }] });
+    assert.deepEqual(calls, ["agentSession.history", "agentSession.cancel"]);
+    assert.deepEqual(
+      reports.map((report) => report.phase),
+      ["claim", "complete"],
+      JSON.stringify(reports),
+    );
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("an unavailable runtime reports an interrupt failure instead of leaving the action pending", async () => {
+  const reports = [];
+  const tick = createWorkBridge({
+    config: {},
+    configPath: "/unused",
+    state: {},
+    save: async () => {},
+    run: () => assert.fail("No runtime"),
+    runtimeLoader: async () => {
+      throw new Error("Runtime unavailable");
+    },
+    call: async (_client, name, args) => {
+      if (name === "work_inbox")
+        return {
+          sessions: [
+            { session: { id: "selected" }, bot: { mode: "orchestrator" } },
+          ],
+          turns: [],
+          actions: [
+            {
+              id: "interrupt",
+              sessionId: "selected",
+              kind: "interrupt",
+              status: "queued",
+            },
+          ],
+        };
+      reports.push(args);
+      return {};
+    },
+  });
+  await tick({}, {});
+  assert.deepEqual(
+    reports.map((report) => report.phase),
+    ["claim", "fail"],
+  );
+  assert.equal(reports[1].error, "Runtime unavailable");
 });

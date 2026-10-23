@@ -85,12 +85,14 @@ export default function MachineConnectDialog({
         {connected ? (
           <div className="space-y-5">
             <p className="text-sm text-muted-foreground">
-              Cada proyecto compartido tiene su agente padre. Ya puedes
-              encargarle trabajo desde Slak.
+              Selecciona un worktree en la barra lateral para abrir sus sesiones
+              y conversar desde Slak.
             </p>
             <div className="flex flex-wrap gap-2">
               <Button asChild>
-                <Link href="/agents">Ver agentes padre</Link>
+                <Link href="/machines" onClick={onClose}>
+                  Ver worktrees
+                </Link>
               </Button>
               <Button variant="outline" onClick={onClose}>
                 Listo

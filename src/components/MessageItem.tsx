@@ -81,7 +81,7 @@ export default function MessageItem({
           <Button asChild variant="outline" size="sm" className="my-2 gap-2">
             <Link href={`/work/${message.workThreadId}`}>
               <Bot className="size-4" />
-              Abrir conversación con el orquestador
+              Abrir sesión de Orca
             </Link>
           </Button>
         )}

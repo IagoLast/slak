@@ -42,7 +42,7 @@ export default function AppShell({
         >
           <SheetTitle className="sr-only">Navegación</SheetTitle>
           <SheetDescription className="sr-only">
-            Canales, personas, agentes y máquinas
+            Canales, personas y sesiones de Orca
           </SheetDescription>
           <Sidebar
             currentUser={currentUser}

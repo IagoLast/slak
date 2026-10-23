@@ -18,13 +18,7 @@ import {
   workThreads,
   workTurns,
 } from "../src/db/schema";
-import {
-  enqueueWork,
-  claimWorkTurn,
-  finishWorkTurn,
-  delegateWork,
-  saveWorkMemory,
-} from "../src/lib/work";
+import { claimWorkTurn, finishWorkTurn, saveWorkMemory } from "../src/lib/work";
 import { registerWorkTools } from "../src/lib/work-mcp";
 
 // Opt-in and isolated fixtures; never point this at the team's production DB.
@@ -96,40 +90,36 @@ after(async () => {
   await db.$client.end();
 });
 
-test("simultaneous replies share one coordinator; messages are FIFO and completion is idempotent", async () => {
+test("session messages are FIFO and completion is idempotent", async () => {
+  threadId = `${prefix}-thread`;
+  sessionId = `${prefix}-session`;
+  await db
+    .insert(workThreads)
+    .values({
+      id: threadId,
+      agentId: bot,
+      channelId: channel,
+      rootMessageId: root,
+      title: "Session",
+      objective: "Chat",
+      repository: "id:test",
+      createdBy: human,
+    });
+  await db
+    .insert(workSessions)
+    .values({ id: sessionId, threadId, role: "orchestrator", name: "Session" });
   await Promise.all(
-    [1, 2].map(async (n) =>
-      db.transaction(async (tx) => {
-        const messageId = `${prefix}-message-${n}`;
-        await tx.insert(messages).values({
-          id: messageId,
-          parentId: root,
-          channelId: channel,
+    [1, 2].map((n) =>
+      db
+        .insert(workTurns)
+        .values({
+          id: `${prefix}-turn-${n}`,
+          sessionId,
           userId: human,
-          content: `Reply ${n}`,
-        });
-        await enqueueWork(tx, {
-          agentId: bot,
-          channelId: channel,
-          messageId,
-          userId: human,
-          prompt: `Reply ${n}`,
-        });
-      }),
+          prompt: `Message ${n}`,
+        }),
     ),
   );
-  const threads = await db
-    .select()
-    .from(workThreads)
-    .where(eq(workThreads.rootMessageId, root));
-  assert.equal(threads.length, 1);
-  threadId = threads[0].id;
-  const sessions = await db
-    .select()
-    .from(workSessions)
-    .where(eq(workSessions.threadId, threadId));
-  assert.equal(sessions.length, 1);
-  sessionId = sessions[0].id;
   const turns = (
     await db.select().from(workTurns).where(eq(workTurns.sessionId, sessionId))
   ).sort((a, b) => +a.createdAt - +b.createdAt || a.id.localeCompare(b.id));
@@ -153,41 +143,25 @@ test("simultaneous replies share one coordinator; messages are FIFO and completi
   await finishWorkTurn(turns[1].id, "Segundo", "completed");
 });
 
-test("a direct conversation reuses the project parent without sharing another channel's context", async () => {
-  const dm = `${prefix}-dm`;
-  await db.insert(channels).values({ id: dm, name: "dm", type: "dm" });
-  try {
-    const results = await Promise.all(
-      [1, 2].map((n) =>
-        db.transaction(async (tx) => {
-          const messageId = `${prefix}-dm-${n}`;
-          await tx
-            .insert(messages)
-            .values({
-              id: messageId,
-              channelId: dm,
-              userId: human,
-              content: `Request ${n}`,
-            });
-          return enqueueWork(tx, {
-            agentId: bot,
-            channelId: dm,
-            messageId,
-            userId: human,
-            prompt: `Request ${n}`,
-          });
-        }),
-      ),
-    );
-    assert.equal(results[0].id, results[1].id);
-    assert.notEqual(results[0].id, threadId);
-  } finally {
-    await db.delete(channels).where(eq(channels.id, dm));
-  }
-});
-
-test("workers have independent queues, notify parent, and cannot overwrite newer durable memory", async () => {
-  const child = await delegateWork(sessionId, "Backend", "Explora API", human);
+test("existing sessions remain independent and cannot overwrite newer memory", async () => {
+  const child = { id: `${prefix}-second-session` };
+  await db
+    .insert(workSessions)
+    .values({
+      id: child.id,
+      threadId,
+      parentId: sessionId,
+      role: "worker",
+      name: "Existing session",
+    });
+  await db
+    .insert(workTurns)
+    .values({
+      id: `${prefix}-second-turn`,
+      sessionId: child.id,
+      userId: human,
+      prompt: "Explora API",
+    });
   const [turn] = await db
     .select()
     .from(workTurns)
@@ -198,7 +172,7 @@ test("workers have independent queues, notify parent, and cannot overwrite newer
     .select()
     .from(workTurns)
     .where(eq(workTurns.sessionId, sessionId));
-  assert.equal(parentTurns.filter((t) => t.kind === "notification").length, 1);
+  assert.equal(parentTurns.filter((t) => t.kind === "notification").length, 0);
   assert.deepEqual(
     await saveWorkMemory(sessionId, "Mantener compatibilidad", 0),
     { version: 1 },

@@ -1,4 +1,5 @@
-import TeamDirectory from "@/components/TeamDirectory";
-export default function AgentsPage() {
-  return <TeamDirectory view="agents" />;
+import { redirect } from "next/navigation";
+
+export default function Page() {
+  redirect("/machines");
 }

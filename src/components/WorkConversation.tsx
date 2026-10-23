@@ -7,11 +7,9 @@ import {
   ArrowUp,
   ArrowUpRight,
   Bot,
-  Brain,
   Check,
   ChevronDown,
   CircleAlert,
-  GitBranch,
   Loader2,
   MessageSquare,
   MoreHorizontal,
@@ -30,7 +28,7 @@ import {
   WorkTurn,
 } from "@/lib/client";
 import MessageContent from "@/components/MessageContent";
-import { workStateLabels } from "@/components/WorkList";
+import { workStateLabels } from "@/lib/workspaces";
 import { worktreeName, workSessionHref } from "@/lib/workspaces";
 import {
   conversationViews,
@@ -55,13 +53,6 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
 
 import {
   AlertDialog,
@@ -78,17 +69,24 @@ export default function WorkConversation({
   threadId,
   sessionId,
   compact = false,
+  embedded = false,
+  draft: controlledDraft,
+  onDraftChange,
   onClose,
 }: {
   threadId: string;
   sessionId?: string;
   compact?: boolean;
+  embedded?: boolean;
+  draft?: string;
+  onDraftChange?: (draft: string) => void;
   onClose?: () => void;
 }) {
   const [view, setView] = useConversationView();
-  const [draft, setDraft] = useState("");
+  const [localDraft, setLocalDraft] = useState("");
+  const draft = controlledDraft ?? localDraft;
+  const setDraft = onDraftChange ?? setLocalDraft;
   const [busy, setBusy] = useState(false);
-  const [memoryOpen, setMemoryOpen] = useState(false);
   const [closeOpen, setCloseOpen] = useState(false);
   const [older, setOlder] = useState<{
     events: WorkEvent[];
@@ -227,22 +225,28 @@ export default function WorkConversation({
   const lastFailure = data.actions.find((a) => a.status === "failed");
   return (
     <div className="flex h-full min-h-0 flex-1 flex-col bg-background">
-      <header className="flex items-start gap-3 border-b px-5 py-4">
+      <header className="flex items-start gap-2 border-b px-4 py-3 sm:gap-3 sm:px-5">
         <div className="mt-0.5 rounded-lg bg-primary/10 p-2 text-primary">
-          <Bot className="size-5" />
+          <MessageSquare className="size-5" />
         </div>
         <div className="min-w-0 flex-1">
           <h1 className="truncate font-semibold tracking-tight">
-            {data.workspace?.name ||
-              (worktree ? worktreeName(worktree) : data.thread.title)}
+            {embedded
+              ? session.name
+              : data.workspace?.name ||
+                (worktree ? worktreeName(worktree) : data.thread.title)}
           </h1>
           <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-            <span>{session.name}</span>
-            <span>·</span>
-            <span className="inline-flex items-center gap-1">
-              <Server className="size-3" />
-              {data.bot.machine}
-            </span>
+            {!embedded && (
+              <>
+                <span>{session.name}</span>
+                <span>·</span>
+                <span className="inline-flex items-center gap-1">
+                  <Server className="size-3" />
+                  {data.bot.machine}
+                </span>
+              </>
+            )}
             <Badge
               variant={session.state === "error" ? "destructive" : "secondary"}
             >
@@ -254,10 +258,52 @@ export default function WorkConversation({
             </Badge>
           </div>
         </div>
+        {data.canManage && ["running", "waiting"].includes(session.state) && (
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={
+              busy ||
+              !!activeAction ||
+              !online ||
+              !data.canSend ||
+              !data.canInterrupt
+            }
+            title={
+              !data.canInterrupt
+                ? "Actualiza y reinicia el puente de Orca"
+                : "Interrumpir el turno actual"
+            }
+            onClick={() =>
+              void command({
+                action: "interrupt",
+                sessionId: session.id,
+              }).catch(() => {})
+            }
+          >
+            <Square className="size-3.5" />
+            <span className="sr-only sm:not-sr-only">Interrumpir</span>
+          </Button>
+        )}
+        {data.canManage && session.state === "stopped" && !session.closedAt && (
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={busy || !!activeAction || !data.canSend}
+            onClick={() =>
+              void command({ action: "rotate", sessionId: session.id }).catch(
+                () => {},
+              )
+            }
+          >
+            Reanudar
+          </Button>
+        )}
         {!compact && data.canCloseWorktree && (
           <Button
             variant="outline"
             size="sm"
+            className="hidden sm:inline-flex"
             disabled={busy || !!activeAction || !online}
             onClick={() => setCloseOpen(true)}
           >
@@ -278,14 +324,6 @@ export default function WorkConversation({
             </Link>
           </Button>
         )}
-        <Button
-          variant="ghost"
-          size="icon"
-          title="Memoria del agente"
-          onClick={() => setMemoryOpen(true)}
-        >
-          <Brain className="size-4" />
-        </Button>
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <Button
@@ -297,6 +335,17 @@ export default function WorkConversation({
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end">
+            {data.canCloseWorktree && (
+              <DropdownMenuItem
+                className="sm:hidden"
+                disabled={busy || !!activeAction || !online}
+                onSelect={() => setCloseOpen(true)}
+              >
+                <Archive className="size-3.5" />
+                Cerrar worktree
+              </DropdownMenuItem>
+            )}
+
             <DropdownMenuItem
               disabled={
                 busy ||
@@ -320,24 +369,6 @@ export default function WorkConversation({
                 !!activeAction ||
                 !data.canSend ||
                 !data.canManage ||
-                ["running", "waiting"].includes(session.state)
-              }
-              onSelect={() =>
-                void command({ action: "rotate", sessionId: session.id }).catch(
-                  () => {},
-                )
-              }
-            >
-              {session.state === "stopped"
-                ? "Reanudar conversación"
-                : "Renovar sesión desde la memoria"}
-            </DropdownMenuItem>
-            <DropdownMenuItem
-              disabled={
-                busy ||
-                !!activeAction ||
-                !data.canSend ||
-                !data.canManage ||
                 session.state === "stopped"
               }
               onSelect={() =>
@@ -348,9 +379,6 @@ export default function WorkConversation({
             >
               <Square className="size-3.5" />
               Detener esta sesión
-            </DropdownMenuItem>
-            <DropdownMenuItem asChild>
-              <Link href={`/c/${data.thread.channelId}`}>Ir al canal</Link>
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
@@ -368,36 +396,10 @@ export default function WorkConversation({
       <div className="flex min-h-0 flex-1">
         <main className="flex min-h-0 min-w-0 flex-1 flex-col">
           <div className="flex flex-wrap items-center gap-2 border-b px-5 py-2.5 text-xs">
-            {data.sessions.length > 1 ? (
-              <nav
-                aria-label="Agentes de la conversación"
-                className="flex w-full min-w-0 gap-1 overflow-x-auto sm:w-auto sm:flex-1"
-              >
-                {data.sessions.map((item) => (
-                  <Link
-                    key={item.id}
-                    href={workSessionHref(threadId, item.id)}
-                    aria-current={item.id === session.id ? "page" : undefined}
-                    className={`flex shrink-0 items-center gap-2 rounded-md px-3 py-2 ${item.id === session.id ? "bg-accent font-medium" : "text-muted-foreground hover:bg-muted"}`}
-                  >
-                    {item.role === "orchestrator" ? (
-                      <Bot className="size-3.5" />
-                    ) : (
-                      <GitBranch className="size-3.5" />
-                    )}
-                    {item.role === "orchestrator" ? "Agente padre" : item.name}
-                    {item.state === "running" && !item.closedAt && (
-                      <Loader2 className="size-3 animate-spin" />
-                    )}
-                  </Link>
-                ))}
-              </nav>
-            ) : (
-              <span className="flex items-center gap-2">
-                <MessageSquare className="size-3.5" />
-                Conversación
-              </span>
-            )}
+            <span className="flex items-center gap-2">
+              <MessageSquare className="size-3.5" />
+              Conversación
+            </span>
             <Select value={view} onValueChange={setView}>
               <SelectTrigger
                 className="ml-auto"
@@ -495,29 +497,7 @@ export default function WorkConversation({
                   />
                 ),
               )}
-              {data.childRequests?.map((request) => (
-                <HarnessEvent
-                  key={`${request.sessionId}:${request.itemId}`}
-                  event={request}
-                  showActivity={false}
-                  name={
-                    data.sessions.find(
-                      (child) => child.id === request.sessionId,
-                    )?.name || "Subagente"
-                  }
-                  disabled={busy || !data.canSend}
-                  onRespond={(body) =>
-                    command({
-                      action: "respond",
-                      sessionId: request.sessionId,
-                      itemId: request.itemId,
-                      revision: request.revision,
-                      ...body,
-                    })
-                  }
-                />
-              ))}
-              {["running", "waiting"].includes(session.state) && (
+              {online && ["running", "waiting"].includes(session.state) && (
                 <div
                   role="status"
                   className="flex items-center gap-2 text-sm text-muted-foreground"
@@ -579,7 +559,7 @@ export default function WorkConversation({
               />
               <div className="flex items-center justify-between gap-2 px-3 pb-3">
                 <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                  <Bot className="size-3.5" /> {session.name}
+                  <MessageSquare className="size-3.5" /> {session.name}
                 </span>
                 <Button
                   size="icon"
@@ -603,7 +583,7 @@ export default function WorkConversation({
               </div>
             </div>
             <p className="mt-2 text-center text-[11px] text-muted-foreground">
-              Visible para quienes tienen acceso al canal · Enter para enviar
+              Enter para enviar · Shift+Enter para salto de línea
             </p>
           </div>
         </main>
@@ -637,40 +617,6 @@ export default function WorkConversation({
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-      <Dialog open={memoryOpen} onOpenChange={setMemoryOpen}>
-        <DialogContent className="max-h-[85dvh] overflow-y-auto sm:max-w-2xl">
-          <DialogHeader>
-            <DialogTitle>Memoria de {session.name.toLowerCase()}</DialogTitle>
-            <DialogDescription>
-              Se conserva entre sesiones. El historial completo sigue disponible
-              al compactar.
-            </DialogDescription>
-          </DialogHeader>
-          <div className="flex flex-wrap gap-2">
-            <Badge variant="outline">Sesión {session.generation}</Badge>
-            <Badge variant="outline">Memoria v{session.memoryVersion}</Badge>
-            {session.context.tokens !== undefined && (
-              <Badge variant="secondary">
-                {session.context.tokens.toLocaleString()} tokens
-                {session.context.window
-                  ? ` / ${session.context.window.toLocaleString()}`
-                  : ""}
-              </Badge>
-            )}
-          </div>
-          <p className="text-sm font-medium">Objetivo</p>
-          <MessageContent content={data.thread.objective} />
-          <p className="text-sm font-medium">Decisiones y progreso</p>
-          {session.memory ? (
-            <MessageContent content={session.memory} />
-          ) : (
-            <p className="text-sm text-muted-foreground">
-              El agente aún no ha guardado un resumen. Los mensajes y las
-              herramientas sí quedan registrados.
-            </p>
-          )}
-        </DialogContent>
-      </Dialog>
     </div>
   );
 }
@@ -680,10 +626,8 @@ function Turn({ turn }: { turn: WorkTurn }) {
     return (
       <details className="rounded-lg border border-dashed p-3 text-xs text-muted-foreground">
         <summary className="cursor-pointer">
-          Actualización de un subagente ·{" "}
-          {turn.status === "queued"
-            ? "en cola para el orquestador"
-            : "recibida por el orquestador"}
+          Actualización anterior ·{" "}
+          {turn.status === "queued" ? "en cola" : "recibida"}
         </summary>
         <div className="mt-3">
           <MessageContent content={turn.prompt} />
@@ -694,7 +638,7 @@ function Turn({ turn }: { turn: WorkTurn }) {
     <div className="ml-auto max-w-[92%] rounded-xl bg-muted/70 px-4 py-3">
       <div className="mb-1.5 flex items-center gap-2 text-xs">
         <span className="font-medium">
-          {turn.kind === "delegation" ? "Encargo del orquestador" : turn.author}
+          {turn.kind === "delegation" ? "Mensaje anterior" : turn.author}
         </span>
         <span className="text-muted-foreground">
           {new Date(turn.createdAt).toLocaleTimeString("es", {

@@ -19,7 +19,7 @@ import {
   workThreads,
   workTurns,
 } from "../src/db/schema";
-import { openWorktreeChat } from "../src/lib/worktree-chat";
+import { listWorktreeChats, openWorktreeChat } from "../src/lib/worktree-chat";
 import { claimWorkTurn, queueWorkAction } from "../src/lib/work";
 import { claimTask, finishTask } from "../src/lib/agents";
 import { registerWorkTools } from "../src/lib/work-mcp";
@@ -38,24 +38,16 @@ const outsider = {
   id: `${prefix}-outsider`,
   email: `${prefix}-outsider@test.invalid`,
 };
-const machineId = `${prefix}-machine`,
-  botId = `${prefix}-parent`;
+const machineId = `${prefix}-machine`;
 let nativeChat: { threadId: string; sessionId: string };
 let client: Client, server: McpServer;
 before(async () => {
   await ensureSchema();
-  await db.insert(users).values(
-    [
-      owner,
-      outsider,
-      {
-        ...owner,
-        id: botId,
-        email: `${botId}@test.invalid`,
-        kind: "agent" as const,
-      },
-    ].map((user) => ({ ...user, passwordHash: "disabled" })),
-  );
+  await db
+    .insert(users)
+    .values(
+      [owner, outsider].map((user) => ({ ...user, passwordHash: "disabled" })),
+    );
   await db.insert(machines).values({
     id: machineId,
     name: "Test",
@@ -63,7 +55,11 @@ before(async () => {
     tokenHash: prefix,
     lastSeenAt: new Date(),
     repositories: [{ id: "id:repo", name: "Project" }],
-    capabilities: ["worktree-chat.v1", "worktree-close.v1"],
+    capabilities: [
+      "worktree-chat.v1",
+      "worktree-close.v1",
+      "session-interrupt.v1",
+    ],
     worktrees: [
       {
         worktree: "path:/feature",
@@ -74,6 +70,7 @@ before(async () => {
         identity: "wt2:local:test",
         nativeSessions: [
           { id: "native-test", name: "Existing agent", provider: "claude" },
+          { id: "native-second", name: "Second session", provider: "codex" },
         ],
       },
       {
@@ -94,15 +91,6 @@ before(async () => {
         runtimeHandle: "term_existing",
       },
     ],
-  });
-  await db.insert(agents).values({
-    id: botId,
-    handle: prefix,
-    createdBy: owner.id,
-    machineId,
-    repository: "id:repo",
-    mode: "orchestrator",
-    state: "ready",
   });
   server = new McpServer({ name: "test", version: "1" });
   registerWorkTools(server, { machineId });
@@ -132,7 +120,7 @@ after(async () => {
   await db.$client.end();
 });
 
-test("simultaneous opens reuse the existing native agent and one conversation", async () => {
+test("simultaneous opens reuse the native session without a project parent", async () => {
   const results = await Promise.all(
     [1, 2, 3].map(() => openWorktreeChat(owner, machineId, "path:/feature")),
   );
@@ -189,25 +177,21 @@ test("terminal receipts cannot update an unrelated native turn with the same req
     where: eq(workThreads.id, terminal.threadId),
   });
   const id = `${prefix}-collision`;
-  await db
-    .insert(workTurns)
-    .values({
-      id,
-      sessionId: nativeChat.sessionId,
-      userId: owner.id,
-      prompt: "Unrelated native request",
-    });
-  await db
-    .insert(agentTasks)
-    .values({
-      id,
-      agentId: thread!.agentId,
-      channelId: thread!.channelId,
-      messageId: thread!.rootMessageId,
-      createdBy: owner.id,
-      prompt: "Terminal request",
-      kind: "message",
-    });
+  await db.insert(workTurns).values({
+    id,
+    sessionId: nativeChat.sessionId,
+    userId: owner.id,
+    prompt: "Unrelated native request",
+  });
+  await db.insert(agentTasks).values({
+    id,
+    agentId: thread!.agentId,
+    channelId: thread!.channelId,
+    messageId: thread!.rootMessageId,
+    createdBy: owner.id,
+    prompt: "Terminal request",
+    kind: "message",
+  });
   await claimTask(thread!.agentId, id);
   await finishTask(thread!.agentId, id, "completed", "Terminal result");
   const native = await db.query.workTurns.findFirst({
@@ -215,6 +199,111 @@ test("terminal receipts cannot update an unrelated native turn with the same req
   });
   assert.equal(native?.status, "queued");
   assert.equal(native?.result, null);
+});
+
+test("worktree tabs include each native session and preserve access across imports", async () => {
+  const before = await listWorktreeChats(owner, machineId, "path:/feature");
+  assert.deepEqual(
+    before.sessions.map((s) => s.runtimeId),
+    ["native-test", "native-second"],
+  );
+  const second = await openWorktreeChat(
+    owner,
+    machineId,
+    "path:/feature",
+    "native-second",
+  );
+  assert.notEqual(second.sessionId, nativeChat.sessionId);
+  assert.deepEqual(
+    await openWorktreeChat(owner, machineId, "path:/feature", "native-second"),
+    second,
+  );
+  const after = await listWorktreeChats(owner, machineId, "path:/feature");
+  assert.equal(after.sessions.length, 2);
+  assert.ok(after.sessions.every((session) => session.sessionId));
+  const hidden = await listWorktreeChats(outsider, machineId, "path:/feature");
+  assert.deepEqual(hidden.sessions, []);
+  await assert.rejects(
+    openWorktreeChat(outsider, machineId, "path:/feature", "native-second"),
+    /no tienes acceso/,
+  );
+  await db
+    .update(machines)
+    .set({ lastSeenAt: new Date(0) })
+    .where(eq(machines.id, machineId));
+  assert.equal(
+    (await listWorktreeChats(owner, machineId, "path:/feature")).online,
+    false,
+  );
+  assert.deepEqual(
+    await openWorktreeChat(owner, machineId, "path:/feature", "native-second"),
+    second,
+  );
+  await db
+    .update(machines)
+    .set({ lastSeenAt: new Date() })
+    .where(eq(machines.id, machineId));
+});
+
+test("interrupt cancels pending turns but keeps the runtime, credentials and conversation reusable", async () => {
+  const sessionId = nativeChat.sessionId;
+  await db
+    .update(workSessions)
+    .set({ state: "running", tokenHash: `${prefix}-credential` })
+    .where(eq(workSessions.id, sessionId));
+  await db
+    .insert(workTurns)
+    .values({
+      id: `${prefix}-running`,
+      sessionId,
+      userId: owner.id,
+      prompt: "Running",
+      status: "running",
+    });
+  const { id } = await queueWorkAction(sessionId, "interrupt");
+  const oldBridge = await client.callTool({
+    name: "work_inbox",
+    arguments: {},
+  });
+  assert.ok(
+    !JSON.parse((oldBridge.content as { text: string }[])[0].text).actions.some(
+      (a: { id: string }) => a.id === id,
+    ),
+  );
+  for (const phase of ["claim", "complete", "complete"]) {
+    const result = await client.callTool({
+      name: "work_action",
+      arguments: { sessionId, actionId: id, phase },
+    });
+    assert.ok(!result.isError, JSON.stringify(result));
+  }
+  const session = await db.query.workSessions.findFirst({
+    where: eq(workSessions.id, sessionId),
+  });
+  assert.equal(session?.runtimeId, "native-test");
+  assert.equal(session?.generation, 1);
+  assert.equal(session?.tokenHash, `${prefix}-credential`);
+  assert.equal(session?.state, "idle");
+  assert.equal(
+    (
+      await db.query.workTurns.findFirst({
+        where: eq(workTurns.id, `${prefix}-running`),
+      })
+    )?.status,
+    "cancelled",
+  );
+  await db
+    .insert(workTurns)
+    .values({
+      id: `${prefix}-followup`,
+      sessionId,
+      userId: owner.id,
+      prompt: "Continue",
+    });
+  await claimWorkTurn(sessionId, `${prefix}-followup`);
+  const available = (await client.listTools()).tools.map((tool) => tool.name);
+  assert.ok(!available.includes("work_delegate"));
+  assert.ok(!available.includes("work_workspace"));
 });
 
 test("closing fences all sessions in a worktree; completion preserves history and rejects stale sync", async () => {

@@ -184,7 +184,7 @@ test("context percentage uses provider measurements and restored prompts include
   );
   assert.match(prompt, /No romper la API/);
   assert.match(prompt, /--version 3/);
-  assert.match(prompt, /delegate/);
+  assert.doesNotMatch(prompt, /delegate|orquestador|agente padre/);
   assert.doesNotMatch(prompt, /slak_[a-f0-9]{64}/);
 });
 

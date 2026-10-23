@@ -1,7 +1,6 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { and, asc, desc, eq, inArray, sql } from "drizzle-orm";
 import { z } from "zod";
-import { nanoid } from "nanoid";
 import { db } from "@/db";
 import {
   agents,
@@ -18,9 +17,7 @@ import {
 import { hashToken } from "@/lib/agents";
 import {
   claimWorkTurn,
-  delegateWork,
   finishWorkTurn,
-  queueWorkAction,
   saveWorkMemory,
   worktreeSessionIds,
 } from "@/lib/work";
@@ -128,39 +125,6 @@ export function registerWorkTools(server: McpServer, principal: WorkPrincipal) {
     },
   );
   server.registerTool(
-    "work_delegate",
-    {
-      description:
-        "El agente padre delega un encargo en un subagente con su propio worktree aislado. Sus resultados vuelven automáticamente al padre, que responde al equipo en Slak.",
-      inputSchema: {
-        sessionId: id,
-        name: z.string().trim().min(1).max(80),
-        prompt: z.string().trim().min(1).max(16000),
-      },
-    },
-    async ({ sessionId, name, prompt }) => {
-      const { thread } = await scope(sessionId);
-      return output(
-        await delegateWork(sessionId, name, prompt, thread.createdBy),
-      );
-    },
-  );
-  server.registerTool(
-    "work_workspace",
-    {
-      description:
-        "Solicita un worktree aislado para este hilo. Devuelve una orden; consulta work_context hasta que worktree esté disponible antes de editar.",
-      inputSchema: { sessionId: id },
-    },
-    async ({ sessionId }) => {
-      const { session, thread } = await scope(sessionId);
-      if (session.role !== "orchestrator")
-        throw new Error("Pide el workspace al orquestador.");
-      if (thread.worktree) return output({ worktree: thread.worktree });
-      return output(await queueWorkAction(sessionId, "workspace"));
-    },
-  );
-  server.registerTool(
     "work_history",
     {
       description:
@@ -253,8 +217,10 @@ export function registerWorkTools(server: McpServer, principal: WorkPrincipal) {
         turns,
         actions: actions.filter(
           (action) =>
-            action.kind !== "close-worktree" ||
-            capabilities.includes("worktree-close.v1"),
+            (action.kind !== "close-worktree" ||
+              capabilities.includes("worktree-close.v1")) &&
+            (action.kind !== "interrupt" ||
+              capabilities.includes("session-interrupt.v1")),
         ),
       });
     },
@@ -433,7 +399,7 @@ export function registerWorkTools(server: McpServer, principal: WorkPrincipal) {
       },
     },
     async ({ sessionId, actionId, phase, error, worktree }) => {
-      const { thread, session } = await scope(sessionId);
+      const { thread } = await scope(sessionId);
       await db.transaction(async (tx) => {
         const [action] = await tx
           .select()
@@ -540,6 +506,25 @@ export function registerWorkTools(server: McpServer, principal: WorkPrincipal) {
               .update(workThreads)
               .set({ worktree })
               .where(eq(workThreads.id, thread.id));
+          if (action.kind === "interrupt") {
+            await tx
+              .update(workSessions)
+              .set({ state: "idle", error: null })
+              .where(eq(workSessions.id, sessionId));
+            await tx
+              .update(workTurns)
+              .set({
+                status: "cancelled",
+                result: "Interrumpido por el equipo.",
+                updatedAt: new Date(),
+              })
+              .where(
+                and(
+                  eq(workTurns.sessionId, sessionId),
+                  inArray(workTurns.status, ["queued", "running"]),
+                ),
+              );
+          }
           if (action.kind === "stop") {
             await tx
               .update(workSessions)
@@ -558,14 +543,6 @@ export function registerWorkTools(server: McpServer, principal: WorkPrincipal) {
                   inArray(workTurns.status, ["queued", "running"]),
                 ),
               );
-            if (session.parentId)
-              await tx.insert(workTurns).values({
-                id: nanoid(),
-                sessionId: session.parentId,
-                userId: thread.createdBy,
-                kind: "notification",
-                prompt: `${session.name} fue detenido por el equipo. Su conversación y memoria se conservan.`,
-              });
           }
           if (action.kind === "compact")
             await tx

@@ -7,9 +7,7 @@ import { useEffect, useRef, useState } from "react";
 import {
   AtSign,
   Bell,
-  Bot,
   Hash,
-  ListTodo,
   Lock,
   LogOut,
   MoreHorizontal,
@@ -20,13 +18,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import useSWR from "swr";
-import {
-  api,
-  fetcher,
-  Summary,
-  SummaryChannel,
-  AgentContact,
-} from "@/lib/client";
+import { api, fetcher, Summary, SummaryChannel } from "@/lib/client";
 import type { SessionUser } from "@/lib/session";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -89,11 +81,6 @@ export default function Sidebar({
     refreshInterval: 5000,
     refreshWhenHidden: true,
   });
-  const { data: agentData } = useSWR<{ agents: AgentContact[] }>(
-    "/api/agents",
-    fetcher,
-    { refreshInterval: 5000 },
-  );
   const [modal, setModal] = useState<"channel" | "dm" | "notifications" | null>(
     null,
   );
@@ -209,38 +196,15 @@ export default function Sidebar({
       >
         <div className="space-y-1">
           <NavLink
-            href="/agents"
-            active={pathname === "/agents"}
-            onClick={onNavigate}
-          >
-            <Bot /> Agentes del equipo
-          </NavLink>
-          <NavLink
             href="/machines"
             active={pathname === "/machines"}
             onClick={onNavigate}
           >
             <Server /> Máquinas compartidas
           </NavLink>
-          <NavLink
-            href="/work"
-            active={pathname.startsWith("/work")}
-            onClick={onNavigate}
-          >
-            <ListTodo /> Hilos de trabajo
-          </NavLink>
-          <NavLink
-            href="/tasks"
-            active={pathname === "/tasks"}
-            onClick={onNavigate}
-          >
-            <ListTodo /> Tareas
-          </NavLink>
         </div>
         <WorkspaceSidebar
           guest={userRole === "guest"}
-          agents={agentData?.agents ?? []}
-          onOpenAgent={openDm}
           onNavigate={onNavigate}
         />
         <div>
@@ -273,33 +237,6 @@ export default function Sidebar({
           {data && !channels.length && (
             <p className="p-2 text-xs text-muted-foreground">
               Crea tu primer canal.
-            </p>
-          )}
-        </div>
-        <div>
-          <SectionHeader label="Agentes" />
-          <ul className="space-y-0.5">
-            {agentData?.agents
-              .filter((agent) => agent.mode === "orchestrator")
-              .map((agent) => (
-                <li key={agent.id}>
-                  <Button
-                    variant="ghost"
-                    className="w-full justify-start font-normal"
-                    onClick={() => openDm(agent.id)}
-                  >
-                    <Bot className="text-muted-foreground" />
-                    <span className="flex-1 truncate text-left">
-                      {agent.name}
-                    </span>
-                    <PresenceDot online={agent.online} />
-                  </Button>
-                </li>
-              ))}
-          </ul>
-          {!agentData?.agents.length && (
-            <p className="px-2 py-1 text-xs text-muted-foreground">
-              Comparte una sesión de Orca.
             </p>
           )}
         </div>
@@ -365,12 +302,12 @@ export default function Sidebar({
           <DialogHeader>
             <DialogTitle>Nuevo mensaje directo</DialogTitle>
             <DialogDescription>
-              Habla con una persona o un agente del equipo.
+              Habla con una persona del equipo.
             </DialogDescription>
           </DialogHeader>
           <div className="max-h-80 space-y-1 overflow-y-auto">
             {data?.users
-              .filter((u) => u.id !== currentUser.id)
+              .filter((u) => u.id !== currentUser.id && u.kind !== "agent")
               .map((u) => (
                 <Button
                   key={u.id}
@@ -378,7 +315,6 @@ export default function Sidebar({
                   className="w-full justify-start"
                   onClick={() => openDm(u.id)}
                 >
-                  {u.kind === "agent" && <Bot />}
                   {u.name}
                   <PresenceDot online={u.online} />
                 </Button>

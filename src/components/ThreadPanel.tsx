@@ -8,8 +8,6 @@ import Composer from "@/components/Composer";
 import MessageItem from "@/components/MessageItem";
 import { ChatMessage, fetcher, MessagePayload } from "@/lib/client";
 import { SessionUser } from "@/lib/session";
-import WorkConversation from "@/components/WorkConversation";
-import { WorkThreadSummary } from "@/lib/client";
 
 /**
  * Panel de hilo: lateral en escritorio, a pantalla completa en móvil.
@@ -23,11 +21,6 @@ export default function ThreadPanel({
   currentUser: SessionUser;
   onClose: () => void;
 }) {
-  const { data: work } = useSWR<{ threads: WorkThreadSummary[] }>(
-    `/api/work?rootId=${rootId}`,
-    fetcher,
-    { refreshInterval: 2500 },
-  );
   const { data, mutate } = useSWR<{
     root: ChatMessage & { channelId: string };
     replies: ChatMessage[];
@@ -72,17 +65,6 @@ export default function ThreadPanel({
     [rootId, currentUser.id, currentUser.name, mutate],
   );
 
-  if (work?.threads.length)
-    return (
-      <div className="fixed inset-0 z-40 flex min-h-0 flex-col bg-background md:static md:z-auto md:w-[min(48rem,65vw)] md:shrink-0 md:border-l">
-        <WorkConversation
-          key={work.threads[0].id}
-          threadId={work.threads[0].id}
-          compact
-          onClose={onClose}
-        />
-      </div>
-    );
   return (
     <div className="fixed inset-0 z-40 flex flex-col bg-background md:static md:z-auto md:w-96 md:shrink-0 md:border-l md:border-border">
       <header className="flex items-center justify-between border-b border-border px-4 py-3">
@@ -136,12 +118,7 @@ export default function ThreadPanel({
         )}
       </div>
 
-      <Composer
-        placeholder="Responder en el hilo"
-        compact
-        channelId={data?.root.channelId}
-        onSend={sendReply}
-      />
+      <Composer placeholder="Responder en el hilo" compact onSend={sendReply} />
     </div>
   );
 }

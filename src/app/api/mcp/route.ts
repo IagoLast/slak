@@ -19,7 +19,6 @@ import { registerWorkTools } from "@/lib/work-mcp";
 import {
   agentInbox,
   authenticateAgent,
-  ensureProjectAgents,
   claimTask,
   finishTask,
   hashToken,
@@ -158,8 +157,6 @@ export async function POST(request: Request) {
               }),
             })
             .where(eq(machines.id, machine.id));
-          if (repositories)
-            await ensureProjectAgents(tx, machine, repositories);
         });
       } else
         await db

@@ -1,5 +1,4 @@
 import { and, asc, eq, isNull } from "drizzle-orm";
-import { queueAgentMessages } from "@/lib/agents";
 import { nanoid } from "nanoid";
 import { NextResponse } from "next/server";
 import { db } from "@/db";
@@ -107,12 +106,6 @@ export async function POST(
       attachmentUrl,
       attachmentName,
       attachmentType: attachmentUrl ? (attachmentType ?? "file") : null,
-    });
-    await queueAgentMessages(tx, {
-      user,
-      channelId: root.channelId,
-      messageId,
-      content,
     });
   });
   await markChannelRead(user.id, root.channelId);

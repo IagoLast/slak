@@ -12,15 +12,11 @@ import {
 } from "react-icons/fi";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
-import { Bot } from "lucide-react";
-import useSWR from "swr";
-import { AgentContact, fetcher } from "@/lib/client";
 import { MessagePayload } from "@/lib/client";
 
 type Props = {
   placeholder: string;
   compact?: boolean;
-  channelId?: string;
   /** Envía el mensaje (el contenedor decide endpoint y update optimista). */
   onSend: (payload: MessagePayload) => Promise<void>;
 };
@@ -31,46 +27,9 @@ type StagedAttachment = {
   type: "file" | "image";
 };
 
-export default function Composer({
-  placeholder,
-  compact,
-  channelId,
-  onSend,
-}: Props) {
+export default function Composer({ placeholder, compact, onSend }: Props) {
   const [text, setText] = useState("");
   const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const [cursor, setCursor] = useState(0);
-  const mention = text.slice(0, cursor).match(/(?:^|\s)@([a-z0-9_-]*)$/i);
-  const { data: agents } = useSWR<{ agents: AgentContact[] }>(
-    mention ? "/api/agents" : null,
-    fetcher,
-  );
-  const { data: members } = useSWR<{ members: { id: string }[] }>(
-    mention && channelId ? `/api/channels/${channelId}/members` : null,
-    fetcher,
-  );
-  const suggestions = mention
-    ? (agents?.agents
-        .filter(
-          (a) =>
-            a.mode === "orchestrator" &&
-            a.enabled &&
-            a.handle.includes(mention[1].toLowerCase()) &&
-            members?.members.some((m) => m.id === a.id),
-        )
-        .slice(0, 6) ?? [])
-    : [];
-  function chooseMention(handle: string) {
-    const start = cursor - (mention?.[1].length ?? 0) - 1;
-    const next = text.slice(0, start) + `@${handle} ` + text.slice(cursor);
-    const nextCursor = start + handle.length + 2;
-    setText(next);
-    setCursor(nextCursor);
-    requestAnimationFrame(() => {
-      textareaRef.current?.focus();
-      textareaRef.current?.setSelectionRange(nextCursor, nextCursor);
-    });
-  }
   // Adjunto ya subido, a la espera de que el usuario pulse enviar.
   const [attachment, setAttachment] = useState<StagedAttachment | null>(null);
   const [uploading, setUploading] = useState(false);
@@ -216,32 +175,6 @@ export default function Composer({
         </div>
       )}
 
-      {mention && channelId && (
-        <div
-          className="mb-2 rounded-lg border bg-popover p-1 shadow-sm"
-          aria-label="Mencionar agente"
-        >
-          {suggestions.length ? (
-            suggestions.map((a) => (
-              <Button
-                key={a.id}
-                variant="ghost"
-                className="w-full justify-start"
-                onClick={() => chooseMention(a.handle)}
-              >
-                <Bot /> @{a.handle}
-                <span className="ml-auto text-xs text-muted-foreground">
-                  {a.machine || a.name}
-                </span>
-              </Button>
-            ))
-          ) : (
-            <p className="p-2 text-xs text-muted-foreground">
-              Añade agentes desde Miembros para mencionarlos aquí.
-            </p>
-          )}
-        </div>
-      )}
       <div
         className={`flex items-end gap-2 rounded-xl border px-3 py-2 ${
           recording ? "border-red-400 bg-red-50" : "border-input"
@@ -268,9 +201,7 @@ export default function Composer({
           placeholder={recording ? "Grabando audio…" : placeholder}
           onChange={(e) => {
             setText(e.target.value);
-            setCursor(e.target.selectionStart);
           }}
-          onSelect={(e) => setCursor(e.currentTarget.selectionStart)}
           onKeyDown={(e) => {
             if (
               e.key === "Enter" &&

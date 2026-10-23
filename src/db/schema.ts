@@ -33,6 +33,7 @@ export const users = pgTable("users", {
 });
 
 export const channels = pgTable("channels", {
+  isWorktree: boolean("is_worktree").notNull().default(false),
   id: text("id").primaryKey(),
   name: text("name").notNull(),
   description: text("description"),
@@ -243,10 +244,7 @@ export const machines = pgTable("machines", {
     .$type<{ id: string; name: string }[]>()
     .notNull()
     .default([]),
-  worktrees: jsonb("worktrees")
-    .$type<SharedWorktree[]>()
-    .notNull()
-    .default([]),
+  worktrees: jsonb("worktrees").$type<SharedWorktree[]>().notNull().default([]),
   sessions: jsonb("sessions")
     .$type<
       {
@@ -267,8 +265,12 @@ export const machines = pgTable("machines", {
 
 export const machinePairings = pgTable("machine_pairings", {
   id: text("id").primaryKey(),
-  ownerId: text("owner_id").notNull().references(() => users.id, { onDelete: "cascade" }),
-  machineId: text("machine_id").references(() => machines.id, { onDelete: "cascade" }),
+  ownerId: text("owner_id")
+    .notNull()
+    .references(() => users.id, { onDelete: "cascade" }),
+  machineId: text("machine_id").references(() => machines.id, {
+    onDelete: "cascade",
+  }),
   tokenHash: text("token_hash").notNull().unique(),
   expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
   consumedAt: timestamp("consumed_at", { withTimezone: true }),
@@ -429,6 +431,7 @@ export const workActions = pgTable(
       enum: [
         "workspace",
         "stop",
+        "interrupt",
         "compact",
         "rotate",
         "respond",

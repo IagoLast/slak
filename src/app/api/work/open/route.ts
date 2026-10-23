@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { getSessionUser } from "@/lib/session";
-import { openWorktreeChat } from "@/lib/worktree-chat";
+import { listWorktreeChats, openWorktreeChat } from "@/lib/worktree-chat";
 
 export async function POST(req: Request) {
   const user = await getSessionUser();
@@ -29,6 +29,29 @@ export async function POST(req: Request) {
     return NextResponse.json(
       { error: (error as Error).message },
       { status: 409 },
+    );
+  }
+}
+
+export async function GET(req: Request) {
+  const user = await getSessionUser();
+  if (!user)
+    return NextResponse.json({ error: "No autenticado" }, { status: 401 });
+  const query = new URL(req.url).searchParams;
+  if (!query.get("machineId") || !query.get("worktree"))
+    return NextResponse.json({ error: "Worktree no válido" }, { status: 400 });
+  try {
+    return NextResponse.json(
+      await listWorktreeChats(
+        user,
+        query.get("machineId")!,
+        query.get("worktree")!,
+      ),
+    );
+  } catch (error) {
+    return NextResponse.json(
+      { error: (error as Error).message },
+      { status: 404 },
     );
   }
 }

@@ -9,7 +9,8 @@ import { getSessionUser } from "@/lib/session";
 /** Abre (o reutiliza) un mensaje directo con otro usuario. */
 export async function POST(req: Request) {
   const user = await getSessionUser();
-  if (!user) return NextResponse.json({ error: "No autenticado" }, { status: 401 });
+  if (!user)
+    return NextResponse.json({ error: "No autenticado" }, { status: 401 });
 
   const body = await req.json().catch(() => null);
   const otherId = String(body?.userId ?? "");
@@ -17,9 +18,14 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "Usuario no válido" }, { status: 400 });
   }
 
-  const other = await db.query.users.findFirst({ where: eq(users.id, otherId) });
-  if (!other) {
-    return NextResponse.json({ error: "Usuario no encontrado" }, { status: 404 });
+  const other = await db.query.users.findFirst({
+    where: eq(users.id, otherId),
+  });
+  if (!other || other.kind !== "human") {
+    return NextResponse.json(
+      { error: "Usuario no encontrado" },
+      { status: 404 },
+    );
   }
 
   const mine = alias(channelMembers, "mine");
@@ -27,7 +33,10 @@ export async function POST(req: Request) {
   const [existing] = await db
     .select({ id: channels.id })
     .from(channels)
-    .innerJoin(mine, and(eq(mine.channelId, channels.id), eq(mine.userId, user.id)))
+    .innerJoin(
+      mine,
+      and(eq(mine.channelId, channels.id), eq(mine.userId, user.id)),
+    )
     .innerJoin(
       theirs,
       and(eq(theirs.channelId, channels.id), eq(theirs.userId, otherId)),

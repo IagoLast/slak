@@ -2,9 +2,6 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import useSWR from "swr";
-import AgentTaskDialog from "@/components/AgentTaskDialog";
-import TaskList from "@/components/TaskList";
-import WorkList from "@/components/WorkList";
 import { Skeleton } from "@/components/ui/skeleton";
 import AddMemberButton from "@/components/AddMemberButton";
 import Composer from "@/components/Composer";
@@ -93,8 +90,6 @@ export default function ChatRoom({
             const data = await res.json().catch(() => null);
             throw new Error(data?.error ?? "No se pudo enviar el mensaje.");
           }
-          const sent = await res.json();
-          if (sent.workThreadId) setOpenThreadId(sent.id);
           return { messages: [...(current?.messages ?? []), optimistic] };
         },
         {
@@ -131,7 +126,6 @@ export default function ChatRoom({
             </p>
           )}
           <div className="ml-auto flex items-center gap-2">
-            <AgentTaskDialog channelId={channelId} />
             <Huddle
               channelId={channelId}
               channelName={channelName}
@@ -143,8 +137,6 @@ export default function ChatRoom({
           </div>
         </header>
 
-        <TaskList channelId={channelId} compact />
-        <WorkList channelId={channelId} compact />
         <div
           ref={scrollRef}
           onScroll={onScroll}
@@ -184,7 +176,6 @@ export default function ChatRoom({
               ? `Mensaje a ${channelName}`
               : `Mensaje a #${channelName}`
           }
-          channelId={channelId}
           onSend={sendMessage}
         />
       </div>

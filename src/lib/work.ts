@@ -3,7 +3,6 @@ import { nanoid } from "nanoid";
 import { db } from "@/db";
 import {
   agents,
-  channels,
   machines,
   messages,
   workActions,
@@ -62,144 +61,6 @@ export async function assertWorktreeNotClosing(
     );
 }
 
-/** Call inside the transaction that inserts the source message. The root lock
- * serializes simultaneous replies, including the first mention in an old thread. */
-export async function enqueueWork(
-  tx: Transaction,
-  input: {
-    agentId: string;
-    channelId: string;
-    messageId: string;
-    userId: string;
-    prompt: string;
-  },
-) {
-  const [source] = await tx
-    .select()
-    .from(messages)
-    .where(eq(messages.id, input.messageId));
-  const [channel] = await tx
-    .select()
-    .from(channels)
-    .where(eq(channels.id, input.channelId));
-  const rootId = source.parentId ?? source.id;
-  if (channel.type === "dm")
-    // Message inserts already hold a foreign-key lock on the channel. An
-    // advisory lock serializes the parent without upgrading that shared lock.
-    await tx.execute(
-      sql`select pg_advisory_xact_lock(hashtextextended(${JSON.stringify(["parent-dm", input.channelId, input.agentId])}, 0))`,
-    );
-  else
-    await tx
-      .select({ id: messages.id })
-      .from(messages)
-      .where(eq(messages.id, rootId))
-      .for("update");
-  let [thread] = await tx
-    .select()
-    .from(workThreads)
-    .where(
-      and(
-        channel.type === "dm"
-          ? eq(workThreads.channelId, input.channelId)
-          : eq(workThreads.rootMessageId, rootId),
-        eq(workThreads.agentId, input.agentId),
-      ),
-    )
-    .orderBy(asc(workThreads.createdAt))
-    .limit(1);
-  if (!thread) {
-    const [bot] = await tx
-      .select()
-      .from(agents)
-      .where(eq(agents.id, input.agentId));
-    [thread] = await tx
-      .insert(workThreads)
-      .values({
-        id: nanoid(),
-        agentId: bot.id,
-        channelId: input.channelId,
-        rootMessageId: rootId,
-        title:
-          input.prompt
-            .replace(/@[\w-]+/g, "")
-            .trim()
-            .slice(0, 100) || "Nueva conversación",
-        objective: input.prompt,
-        repository: bot.repository,
-        createdBy: input.userId,
-      })
-      .returning();
-    await tx.insert(workSessions).values({
-      id: nanoid(),
-      threadId: thread.id,
-      name: "Orquestador",
-      role: "orchestrator",
-    });
-  }
-  const [session] = await tx
-    .select()
-    .from(workSessions)
-    .where(
-      and(
-        eq(workSessions.threadId, thread.id),
-        eq(workSessions.role, "orchestrator"),
-      ),
-    );
-  await tx
-    .insert(workTurns)
-    .values({
-      id: nanoid(),
-      sessionId: session.id,
-      messageId: input.messageId,
-      userId: input.userId,
-      prompt: input.prompt,
-    })
-    .onConflictDoNothing();
-  return thread;
-}
-
-export async function delegateWork(
-  parentId: string,
-  name: string,
-  prompt: string,
-  userId: string,
-) {
-  return db.transaction(async (tx) => {
-    const [parent] = await tx
-      .select()
-      .from(workSessions)
-      .where(eq(workSessions.id, parentId))
-      .for("update");
-    if (!parent || parent.role !== "orchestrator")
-      throw new Error("Solo el orquestador puede delegar.");
-    const children = await tx
-      .select({ id: workSessions.id })
-      .from(workSessions)
-      .where(eq(workSessions.threadId, parent.threadId));
-    if (children.length >= 16)
-      throw new Error(
-        "Este hilo ya tiene 15 subagentes. Reutiliza una conversación existente.",
-      );
-    const id = nanoid();
-    await tx.insert(workSessions).values({
-      id,
-      threadId: parent.threadId,
-      parentId,
-      name,
-      role: "worker",
-    });
-    await tx.insert(workTurns).values({
-      id: nanoid(),
-      sessionId: id,
-      userId,
-      prompt,
-      kind: "delegation",
-    });
-    return { id, threadId: parent.threadId };
-  });
-}
-
 export async function finishWorkTurn(
   turnId: string,
   result: string,
@@ -236,16 +97,6 @@ export async function finishWorkTurn(
         content: result,
       });
     }
-    // A direct intervention in a worker always returns to the coordinator's inbox.
-    // The bot's own replies never feed back into themselves.
-    if (session.parentId)
-      await tx.insert(workTurns).values({
-        id: nanoid(),
-        sessionId: session.parentId,
-        userId: turn.userId,
-        kind: "notification",
-        prompt: `Actualización de ${session.name} (${session.id}). Estado: ${status}.\nPetición recibida: ${turn.prompt.slice(0, 4000)}\nResultado:\n${result.slice(0, 12000)}`,
-      });
     return { replayed: false };
   });
 }
@@ -289,6 +140,26 @@ export async function queueWorkAction(
       )
         throw new Error("Conecta la máquina antes de cerrar el worktree.");
       payload = { worktree: tree.worktree, identity: tree.identity };
+    }
+    if (kind === "interrupt") {
+      const [target] = await tx
+        .select({ machine: machines })
+        .from(machines)
+        .innerJoin(agents, eq(agents.machineId, machines.id))
+        .innerJoin(workThreads, eq(workThreads.agentId, agents.id))
+        .where(eq(workThreads.id, session.threadId));
+      if (!target?.machine.capabilities.includes("session-interrupt.v1"))
+        throw new Error(
+          "Actualiza y reinicia el puente de Orca para interrumpir sesiones.",
+        );
+      if (
+        !target.machine.tokenHash ||
+        !target.machine.lastSeenAt ||
+        target.machine.lastSeenAt.getTime() < Date.now() - 60_000
+      )
+        throw new Error("Conecta la máquina antes de interrumpir el turno.");
+      if (session.state === "stopped")
+        throw new Error("Esta sesión está detenida.");
     }
     await assertWorktreeNotClosing(tx, sessionId);
     const [pending] = await tx

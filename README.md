@@ -76,164 +76,67 @@ Esto levanta un Postgres local independiente (puerto 54329) y Next.js en
 Puedes cambiar el puerto con `PORT=3107 npm run dev:local`. Los datos se conservan
 en el volumen `slak_data`; `docker compose stop` detiene la base sin borrarlos.
 El secreto de sesión de desarrollo cambia al reiniciar si no defines `AUTH_SECRET`.
-Los adjuntos siguen necesitando `BLOB_READ_WRITE_TOKEN`; chat, agentes y MCP no.
+Los adjuntos siguen necesitando `BLOB_READ_WRITE_TOKEN`; chat y sesiones de Orca no.
 
-## Orca compartido: máquinas, bots y conversaciones
+## Orca remoto
 
-Cada máquina compartida tiene un **agente padre por proyecto de Orca**. Slak lo
-crea automáticamente al recibir los proyectos del puente y reutiliza los padres
-existentes. El padre es el interlocutor del equipo: organiza el trabajo y delega
-en subagentes, cada uno con su propio worktree aislado. No hay que elegir entre
-crear un bot, compartir una terminal o conectar un agente externo.
+La v0 combina canales y mensajes directos entre personas con las sesiones de Orca
+de las máquinas compartidas. No hay bots de proyecto, encargos ni delegación.
 
-El mensaje directo conserva la conversación con el padre. Los encargos de otros
-canales mantienen hilos, permisos y contextos separados: una identidad de proyecto
-no implica compartir memoria privada entre canales. Cada worktree abre directamente
-la conversación de su agente en Slak, con su historial, actividad y solicitudes
-pendientes. También puedes seguir coordinando
-el trabajo desde el padre.
+1. En **Máquinas compartidas → Conectar mi Orca**, copia el comando y ejecútalo
+   en la máquina que tiene Orca. Elige los proyectos que quieres compartir.
+2. La barra lateral muestra **máquina → proyecto → worktree**.
+3. Haz clic en un worktree para abrir sus **pestañas de sesiones**. Cada pestaña
+   mantiene su propia conversación, historial, actividad, preguntas y aprobaciones.
+   Las sesiones nativas existentes se reutilizan sin cambiar sus instrucciones.
+4. Escribe directamente a la sesión. **Interrumpir** cancela el turno y los mensajes
+   pendientes de esa sesión; conserva el runtime y puedes seguir hablando después.
+5. Si la máquina se desconecta, puedes consultar el historial sincronizado. Los
+   mensajes nuevos quedan en cola hasta que vuelva a conectarse.
 
-1. En **Máquinas compartidas → Conectar mi Orca**, pulsa **Copiar comando**.
-2. Pégalo en una terminal de la **misma máquina que Orca** y elige los proyectos
-   por su nombre en la lista. El instalador detecta el nombre de la máquina,
-   instala el puente y guarda su configuración automáticamente. No necesitas
-   descargar un JSON, clonar Slak ni buscar IDs. La app confirma la conexión
-   cuando recibe el primer heartbeat real.
+Si no hay sesiones disponibles, **Abrir conversación** prepara una nueva; Orca
+la inicia al enviar el primer mensaje. Abrir un worktree no arranca agentes padre
+ni crea worktrees adicionales. Las conversaciones importadas son privadas para
+quien las abre y el propietario de la máquina; las existentes conservan sus permisos.
+Los invitados solo acceden a conversaciones que ya tienen compartidas.
 
-   Requiere macOS/Linux, Node 20+ con npm, `curl`, Orca abierto con su CLI instalado
-   y Codex o Claude Code autenticados. Mantén esa terminal abierta mientras
-   compartes; `Ctrl+C` detiene el puente. El instalador deja un archivo
-   `~/.slak/machines/<id>/conectar.command` para volver a arrancarlo sin repetir
-   el alta. La configuración, los recibos y las credenciales tienen permisos
-   privados. El comando de alta es personal, de un solo uso y caduca a los
-   15 minutos; el token permanente nunca aparece en él. Para otra máquina, usa
-   una URL HTTPS de Slak accesible desde ella. El puente no abre puertos.
+El menú de sesión permite compactar contexto o detener la sesión. El propietario
+(o un administrador) puede cerrar y archivar un worktree, con confirmación,
+conservando archivos e historial. Interrumpir requiere un puente actualizado:
+**actualiza y reinicia el puente en cada máquina** para habilitarlo.
 
-3. La barra lateral muestra **máquina → proyecto → agente padre y worktrees**.
-   Cada worktree abre directamente su agente y conserva su último estado cuando
-   el puente se desconecta. Si hay varios agentes en un hilo, las
-   pestañas de la conversación permiten cambiar entre el padre y los subagentes.
-4. Habla con el padre desde la barra lateral, añádelo a un canal y menciona
-   `@alias`, o usa **Encargar tarea**. El padre responde y reúne los resultados.
-5. El padre puede crear subagentes con `work_delegate`; el puente prepara un
-   worktree distinto para cada subagente nuevo. Las sesiones ya existentes
-   conservan su workspace. Los resultados vuelven automáticamente al padre.
-   Puedes intervenir directamente en el chat de un subagente desde su worktree;
-   el resultado también llega al padre. Las preguntas y aprobaciones siguen
-   apareciendo tanto en el chat del subagente como en el del padre.
+### Conexión
 
-   La vista se puede cambiar entre **Solo respuestas** (por defecto), **Mensajes
-   y avances** y **Toda la actividad**. La preferencia se guarda en el navegador.
-   Las preguntas, aprobaciones y errores siempre permanecen visibles. Los eventos
-   antiguos sin metadatos de turno conservan sus mensajes hasta sincronizarse con
-   un puente actualizado; no se adivina qué respuesta era final.
-   Las instrucciones y la memoria se envían al iniciar o restaurar una sesión.
-   Los siguientes mensajes conservan el texto original con metadatos mínimos de
-   origen, autor, tipo de mensaje y worktree cuando corresponde.
-6. En el menú de conversación puedes **Detener**, **Compactar contexto** o
-   **Renovar sesión desde la memoria**. Reanudar una sesión detenida crea una nueva
-   generación conservando hilo, memoria y eventos. Detener el bot detiene sus
-   sesiones compartidas; el worktree no se borra. Desconectar la máquina revoca el
-   puente y deja los procesos locales tal como están.
-7. **Cerrar worktree** suspende todos sus agentes y terminales y lo archiva en
-   Orca, previa confirmación. Conserva archivos, cambios e historial. Solo el
-   propietario de la máquina o un administrador puede cerrarlo, con el puente
-   conectado y actualizado. Slak muestra el cierre cuando Orca lo confirma; si
-   falla, conserva el error y permite revisarlo. Puedes reabrirlo desde Orca.
+Requiere macOS/Linux, Node 20+ con npm, `curl`, Orca abierto con su CLI instalado
+y Codex o Claude Code autenticados. Mantén la terminal del puente abierta;
+`Ctrl+C` lo detiene. El instalador guarda un acceso para reconectar en
+`~/.slak/machines/<id>/conectar.command`. El comando de alta es personal, de un
+solo uso y caduca a los 15 minutos. Para otra máquina usa una URL HTTPS de Slak
+accesible desde ella. El puente no abre puertos.
 
-Al entrar en un worktree que aún no tiene conversación, Slak reutiliza el chat
-nativo activo de Orca o la sesión de terminal compartida. Si no hay agente,
-prepara una conversación nueva y lo inicia al enviar el primer mensaje. Los chats
-importados se guardan en un canal privado para quien lo abre y el propietario de
-la máquina; los hilos existentes conservan sus permisos. El historial anterior de
-las sesiones de terminal permanece en Orca; sus nuevas respuestas llegan a Slak.
-Actualiza y reinicia el puente para habilitar la apertura y el cierre de worktrees;
-los puentes anteriores mantienen sus conversaciones existentes.
-
-### Conexión manual avanzada
-
-Las configuraciones anteriores siguen funcionando:
+Las configuraciones manuales siguen funcionando:
 
 ```bash
 npm run orca:bridge -- --config ./slak-machine.json --repo id:ID_DEL_PROYECTO
 ```
 
-Puedes repetir `--repo` o usar `--share-all`. `--worktree path:/ruta` limita el
-acceso a worktrees concretos e impide crear otros. El instalador guarda la
-selección de proyectos en la configuración para no tener que repetir argumentos.
+Puedes repetir `--repo`, usar `--share-all` o limitar los worktrees con
+`--worktree path:/ruta`. El instalador guarda la selección de proyectos.
 
-### Contexto y recuperación
+### Transporte e historial
 
-- No existe una sesión global que acumule todas las conversaciones del bot.
-- Cada coordinador y cada worker tiene memoria versionada en Postgres, además del
-  historial completo y una cola persistente. El agente guarda decisiones, plan,
-  restricciones, progreso y referencias con `work_remember`. La UI muestra la
-  memoria y los tokens comunicados por el proveedor.
-- Antes de enviar otro turno, el puente solicita compactación nativa si Orca
-  informa de un uso de contexto de al menos el 80 %. Las sesiones renovadas se
-  reconstruyen con objetivo, memoria y turnos recientes; el historial antiguo se
-  consulta por páginas con `work_history`. No se inventan porcentajes cuando el
-  proveedor no publica consumo.
-- Los eventos se sincronizan por item/revisión y cursor. Los envíos guardan su
-  identificador, fingerprint y fence antes de ejecutarse. Un reintento conserva
-  exactamente la misma operación nativa. Si se pierde el recibo local de un turno
-  en curso, se muestra un error y no se duplica el mensaje automáticamente.
-- El bridge entrega a cada sesión una credencial MCP limitada a su conversación,
-  guardada en `slak-machine.json.sessions/` con permisos privados. El token de la
-  máquina no se incluye en el prompt. Las credenciales y recibos están ignorados
-  por git. No ejecutes dos puentes con la misma configuración.
-
-### Adaptador nativo y compatibilidad
-
-Las conversaciones nuevas usan `agentSession.create/send/history/cancel` y
-`conversationCommand` del runtime de Orca. El adaptador carga el transporte de la
-instalación local y comprueba `agent-session.structured.v1`. Se ha comprobado con
-**Orca 1.4.229**. Esta API pertenece al runtime y puede cambiar entre versiones;
-una instalación incompatible muestra un error, sin simular herramientas ni pasar
-silenciosamente a terminal. Si no se detecta la instalación, define
-`SLAK_ORCA_RUNTIME=/ruta/a/out/cli/runtime/client.js`.
-
-Los subagentes creados con `work_delegate` son sesiones nativas coordinadas por
-el agente padre. La actividad de subagentes internos del proveedor se muestra en su padre;
-no se presenta como una conversación independiente si Orca no la expone como tal.
-Las preguntas agrupadas y aprobaciones se responden con revisión para impedir
-respuestas sobre una solicitud que ya cambió.
-
-Las sesiones de terminal existentes siguen usando el adaptador anterior y sus
-resultados `report`; no adquieren retrospectivamente eventos estructurados. El
-catálogo incluye terminales y chats nativos Codex/Claude de los worktrees
-compartidos. Los chats nativos importados conservan su sesión e historial de Orca,
-sin iniciar otro agente ni cambiar sus instrucciones.
-No se ejecutan automáticamente los setup hooks al crear un worktree.
-
-Los canales privados y DMs mantienen sus permisos en listados, historial y MCP.
-Quitar al bot de un canal revoca el acceso del puente a los hilos de ese canal.
-Solo el propietario o un administrador pueden regenerar/revocar la conexión de
-una máquina. Los invitados no pueden conectar máquinas ni detener sesiones.
-
-### Agentes externos por MCP
-
-La opción **Conectar un agente externo por MCP** genera configuración para un
-cliente MCP y un token específico de ese agente. El endpoint es `/api/mcp`,
-con cabecera `Authorization: Bearer slak_…` y transporte Streamable HTTP sin sesión.
-
-- `heartbeat`: mantener presencia (llamar al menos cada 30 segundos).
-- `list_tasks`: obtener mensajes/tareas pendientes y en curso del agente.
-- `claim_task`: recoger atómicamente una tarea antes de ejecutarla.
-- `task_context`: leer el contexto autorizado de esa tarea.
-- `reply_task`: publicar un avance en el hilo.
-- `finish_task`: completar/fallar y publicar el resultado (una sola vez).
-
-Un token de máquina añade `list_commands`, `claim_command`, `report_command` y
-las operaciones de transporte `work_inbox`, `work_claim`, `work_bind`, `work_sync`,
-`work_finish` y `work_action`. Las credenciales de conversación solo exponen
-`work_context`, `work_history`, `work_remember`, `work_workspace` y `work_delegate`;
-las dos últimas están reservadas al orquestador.
-Los tokens de agentes no pueden ejecutar esas operaciones ni leer trabajo de otros
-agentes. El endpoint rechaza orígenes web ajenos y autentica cada petición.
-
-Implementado con el [SDK oficial MCP](https://ts.sdk.modelcontextprotocol.io/server)
-y componentes [shadcn/ui](https://ui.shadcn.com/docs/components/radix/context-menu).
+- El adaptador nativo usa `agentSession.create/send/history/cancel` del runtime
+  de Orca y comprueba `agent-session.structured.v1`. Si no encuentra la instalación,
+  define `SLAK_ORCA_RUNTIME=/ruta/a/out/cli/runtime/client.js`.
+- Los envíos tienen recibos persistentes para no duplicar mensajes tras reconectar.
+  Los eventos se sincronizan por item, revisión y cursor.
+- Las sesiones de terminal anteriores conservan su adaptador y sus nuevas respuestas
+  llegan a Slak; su historial anterior y los controles de turno siguen en Orca.
+- La base conserva los identificadores y registros anteriores por compatibilidad.
+  Los canales internos de las sesiones no aparecen como canales de Slack.
+- El endpoint `/api/mcp` mantiene el transporte autenticado del puente. Las
+  credenciales por conversación solo exponen contexto, historial y memoria;
+  ya no hay herramientas de delegación ni creación de worktrees.
 
 ## UI y canales
 
@@ -267,6 +170,5 @@ para crear bases; crea y elimina su propia base temporal):
 SLAK_TEST_DATABASE=1 DATABASE_URL=postgres://...@127.0.0.1:54329/slak npx tsx --test tests/registration.test.ts
 ```
 
-Crean y eliminan sus propios fixtures. El smoke nativo se validó además en una base
-local aislada: mención → herramientas → respuesta → memoria → worker → intervención
-directa → notificación al padre; también se revisaron escritorio y móvil.
+Las pruebas de base de datos crean y eliminan sus propios fixtures. Los tests del
+puente usan un runtime simulado y no envían mensajes a sesiones reales de Orca.

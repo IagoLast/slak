@@ -52,7 +52,7 @@ export async function POST(req: Request, { params }: Params) {
   const target = await db.query.users.findFirst({
     where: eq(users.id, userId),
   });
-  if (!target) {
+  if (!target || target.kind !== "human") {
     return NextResponse.json(
       { error: "Usuario no encontrado" },
       { status: 404 },

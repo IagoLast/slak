@@ -1,14 +1,7 @@
 import { and, asc, desc, eq, inArray, ne, or, sql } from "drizzle-orm";
 import { NextResponse } from "next/server";
 import { db } from "@/db";
-import {
-  agents,
-  channelMembers,
-  channels,
-  machines,
-  messages,
-  users,
-} from "@/db/schema";
+import { channelMembers, channels, messages, users } from "@/db/schema";
 import { getSessionUser } from "@/lib/session";
 
 /**
@@ -37,13 +30,16 @@ export async function GET() {
     .select()
     .from(channels)
     .where(
-      user.role === "guest"
-        ? memberIds.length > 0
-          ? inArray(channels.id, memberIds)
-          : sql`false`
-        : memberIds.length > 0
-          ? or(eq(channels.type, "public"), inArray(channels.id, memberIds))
-          : eq(channels.type, "public"),
+      and(
+        eq(channels.isWorktree, false),
+        user.role === "guest"
+          ? memberIds.length > 0
+            ? inArray(channels.id, memberIds)
+            : sql`false`
+          : memberIds.length > 0
+            ? or(eq(channels.type, "public"), inArray(channels.id, memberIds))
+            : eq(channels.type, "public"),
+      ),
     )
     .orderBy(asc(channels.name));
 
@@ -128,52 +124,41 @@ export async function GET() {
         name: users.name,
         role: users.role,
         kind: users.kind,
-        agentSeenAt: agents.lastSeenAt,
-        tokenHash: agents.tokenHash,
-        machineId: agents.machineId,
-        machineSeenAt: machines.lastSeenAt,
-        machineToken: machines.tokenHash,
-        state: agents.state,
         lastSeenAt: users.lastSeenAt,
       })
       .from(users)
-      .leftJoin(agents, eq(agents.id, users.id))
-      .leftJoin(machines, eq(machines.id, agents.machineId))
+      .where(eq(users.kind, "human"))
       .orderBy(asc(users.name))
   ).map((u) => ({
     id: u.id,
     name: u.name,
     role: u.role,
     kind: u.kind,
-    online:
-      u.kind === "agent"
-        ? u.machineId
-          ? !!u.machineToken &&
-            !!u.machineSeenAt &&
-            u.machineSeenAt.getTime() > Date.now() - 60_000 &&
-            u.state === "ready"
-          : !!u.tokenHash &&
-            !!u.agentSeenAt &&
-            u.agentSeenAt.getTime() > Date.now() - 60_000
-        : u.lastSeenAt.getTime() > presenceCutoff,
+    online: u.lastSeenAt.getTime() > presenceCutoff,
   }));
 
   return NextResponse.json({
     user,
-    channels: visibleChannels.map((c) => ({
-      id: c.id,
-      name:
-        c.type === "dm" ? (partnerByChannel.get(c.id)?.name ?? "DM") : c.name,
-      type: c.type,
-      canDelete:
-        c.type !== "dm" &&
-        user.role !== "guest" &&
-        (user.role === "admin" || c.createdBy === user.id),
-      description: c.type === "dm" ? null : c.description,
-      unread: unreadByChannel.get(c.id) ?? 0,
-      dmUserId: c.type === "dm" ? partnerByChannel.get(c.id)?.id : undefined,
-      lastMessage: lastByChannel.get(c.id) ?? null,
-    })),
+    channels: visibleChannels
+      .filter(
+        (c) =>
+          c.type !== "dm" ||
+          allUsers.some((u) => u.id === partnerByChannel.get(c.id)?.id),
+      )
+      .map((c) => ({
+        id: c.id,
+        name:
+          c.type === "dm" ? (partnerByChannel.get(c.id)?.name ?? "DM") : c.name,
+        type: c.type,
+        canDelete:
+          c.type !== "dm" &&
+          user.role !== "guest" &&
+          (user.role === "admin" || c.createdBy === user.id),
+        description: c.type === "dm" ? null : c.description,
+        unread: unreadByChannel.get(c.id) ?? 0,
+        dmUserId: c.type === "dm" ? partnerByChannel.get(c.id)?.id : undefined,
+        lastMessage: lastByChannel.get(c.id) ?? null,
+      })),
     users: allUsers,
   });
 }

@@ -115,21 +115,18 @@ export async function openWorktreeChat(
     const terminal = !native
       ? machine.sessions.find((session) => session.worktree === worktree)
       : null;
+    // Internal transport identity, created only when opening a session.
+    // Native sessions need no project parent or orchestration setup.
     let bot = terminal
       ? await tx.query.agents.findFirst({
           where: and(
             eq(agents.machineId, machineId),
             eq(agents.worktree, worktree),
+            eq(agents.mode, "session"),
           ),
         })
-      : await tx.query.agents.findFirst({
-          where: and(
-            eq(agents.machineId, machineId),
-            eq(agents.repository, tree.repository),
-            eq(agents.mode, "orchestrator"),
-          ),
-        });
-    if (terminal && !bot) {
+      : undefined;
+    if (!bot) {
       const id = nanoid();
       await tx.insert(users).values({
         id,
@@ -143,21 +140,21 @@ export async function openWorktreeChat(
         .insert(agents)
         .values({
           id,
-          handle: `wt-${nanoid(12).toLowerCase()}`,
-          mode: "session",
+          handle: `session-${nanoid(12).toLowerCase()}`,
+          mode: terminal ? "session" : "orchestrator",
           machineId,
           repository: tree.repository,
-          worktree,
+          worktree: terminal ? worktree : "",
           machine: machine.name,
-          runtimeHandle: terminal.runtimeHandle,
-          provider: terminal.provider,
+          runtimeHandle: terminal?.runtimeHandle,
+          provider: native?.provider || terminal?.provider || "codex",
           state: "ready",
           createdBy: user.id,
         })
         .returning();
     }
-    if (!bot || bot.state !== "ready")
-      throw new Error("El agente del proyecto no está disponible.");
+    if (bot.state !== "ready")
+      throw new Error("Esta sesión no está disponible.");
     const channelId = nanoid(),
       rootId = nanoid(),
       threadId = nanoid(),
@@ -165,6 +162,7 @@ export async function openWorktreeChat(
     await tx.insert(channels).values({
       id: channelId,
       name: `Worktree · ${tree.name}`.slice(0, 100),
+      isWorktree: true,
       type: "private",
       createdBy: user.id,
     });
@@ -195,7 +193,7 @@ export async function openWorktreeChat(
       id: sessionId,
       threadId,
       role: "orchestrator",
-      name: native?.name || "Agente del worktree",
+      name: native?.name || terminal?.name || "Nueva conversación",
       worktree,
       runtimeId: native?.id,
       imported: !!native,
@@ -203,4 +201,80 @@ export async function openWorktreeChat(
     });
     return { threadId, sessionId };
   });
+}
+
+export async function listWorktreeChats(
+  user: SessionUser,
+  machineId: string,
+  worktree: string,
+) {
+  const machine = await db.query.machines.findFirst({
+    where: eq(machines.id, machineId),
+  });
+  if (!machine) throw new Error("Máquina no encontrada.");
+  const rows = await db
+    .select({
+      session: workSessions,
+      thread: workThreads,
+      channel: channels,
+      accessible: sql<boolean>`(${channels.type} = 'public' and ${user.role !== "guest"}) or exists (select 1 from channel_members cm where cm.channel_id = ${channels.id} and cm.user_id = ${user.id})`,
+    })
+    .from(workSessions)
+    .innerJoin(workThreads, eq(workThreads.id, workSessions.threadId))
+    .innerJoin(agents, eq(agents.id, workThreads.agentId))
+    .innerJoin(channels, eq(channels.id, workThreads.channelId))
+    .where(eq(agents.machineId, machineId))
+    .orderBy(asc(workSessions.createdAt));
+  const tree = machine.worktrees.find((tree) => tree.worktree === worktree);
+  const accessible = rows.filter(
+    ({ session, thread, accessible }) =>
+      accessible &&
+      !session.closedAt &&
+      (session.worktree ||
+        (session.role === "orchestrator" ? thread.worktree : null)) ===
+        worktree,
+  );
+  if (!accessible.length && (!tree || user.role === "guest"))
+    throw new Error("Worktree no disponible.");
+  const bound = new Set(
+    rows.map(({ session }) => session.runtimeId).filter(Boolean),
+  );
+  const sessions = [
+    ...accessible.map(({ session, thread }) => ({
+      id: session.runtimeId ? `native:${session.runtimeId}` : session.id,
+      threadId: thread.id,
+      sessionId: session.id,
+      runtimeId: session.runtimeId,
+      name: session.name,
+      state: session.state,
+    })),
+    ...(user.role !== "guest" && machine.tokenHash
+      ? (tree?.nativeSessions ?? [])
+      : []
+    )
+      .filter((session) => !bound.has(session.id))
+      .map((session) => ({
+        id: `native:${session.id}`,
+        runtimeId: session.id,
+        name:
+          session.name || (session.provider === "claude" ? "Claude" : "Codex"),
+        state: "idle" as const,
+        threadId: null,
+        sessionId: null,
+      })),
+  ];
+  return {
+    name: tree?.name || worktree.split("/").at(-1) || worktree,
+    machine: machine.name,
+    online:
+      !!machine.tokenHash &&
+      !!machine.lastSeenAt &&
+      machine.lastSeenAt.getTime() > Date.now() - 60_000,
+    sessions,
+    canOpen:
+      user.role !== "guest" &&
+      !!tree &&
+      !!machine.tokenHash &&
+      machine.capabilities.includes("worktree-chat.v1"),
+  };
 }

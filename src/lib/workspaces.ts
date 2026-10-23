@@ -128,3 +128,19 @@ export function workspaceGroups(
 export function workSessionHref(threadId: string, sessionId?: string) {
   return `/work/${threadId}${sessionId ? `?${new URLSearchParams({ session: sessionId })}` : ""}`;
 }
+
+export const workStateLabels: Record<WorkThreadSummary["state"], string> = {
+  idle: "Disponible",
+  running: "Trabajando",
+  waiting: "Necesita respuesta",
+  stopped: "Detenida",
+  error: "Error",
+};
+
+export function worktreeHref(
+  machineId: string,
+  worktree: string,
+  sessionId?: string,
+) {
+  return `/work?${new URLSearchParams({ machineId, worktree, ...(sessionId && { session: sessionId }) })}`;
+}
